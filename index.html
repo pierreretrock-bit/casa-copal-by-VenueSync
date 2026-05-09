@@ -5,18 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Casa Copal Admin - VenueSync</title>
     
-    <!-- Traductores y Estilos necesarios para ejecutar React sin VS Code -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
-    <!-- LIBRERÍA NUEVA: Para descargar los folletos como imágenes HD -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    
-    <!-- TIPOGRAFÍA ORIGINAL DE LOS FOLLETOS (Montserrat) -->
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;700;900&display=swap" rel="stylesheet">
 
-    <!-- MAPA DE IMPORTACIONES -->
     <script type="importmap">
       {
         "imports": {
@@ -38,7 +32,7 @@
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
         import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, setDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
-        import { LayoutDashboard, CalendarDays, WalletCards, Users, Megaphone, PlusCircle, LogOut, CheckCircle2, AlertCircle, TrendingUp, FileText, Copy, Smartphone, Download, UserCircle, Settings, Lock, Sparkles, Loader2, FileSpreadsheet } from 'lucide-react';
+        import { LayoutDashboard, CalendarDays, WalletCards, Users, Megaphone, LogOut, CheckCircle2, AlertCircle, TrendingUp, FileText, Copy, UserCircle, Settings, Lock, Sparkles, Loader2, FileSpreadsheet, Menu, X } from 'lucide-react';
 
         // ============================================================================
         // 1. CONFIGURACIÓN FIREBASE
@@ -57,17 +51,16 @@
         const db = getFirestore(app);
 
         // ============================================================================
-        // 2. UTILIDAD GEMINI API (IA)
+        // 2. UTILIDAD GEMINI API (IA) - REPARADA
         // ============================================================================
         const callGeminiAI = async (prompt, expectJson = false) => {
             const apiKey = "AIzaSyDCFd4xJLZ7wazjwZ5cGLnl-z8PhQfKncY"; 
             const modelVersion = "gemini-1.5-flash"; 
-
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelVersion}:generateContent?key=${apiKey}`;
+            const url = "https://generativelanguage.googleapis.com/v1beta/models/" + modelVersion + ":generateContent?key=" + apiKey;
             
             let finalPrompt = "Eres un asistente de negocios para un salón de eventos familiares llamado Casa Copal.\n\n" + prompt;
             if (expectJson) {
-                finalPrompt += "\n\nIMPORTANTE: Devuelve ÚNICAMENTE un objeto JSON válido. No uses bloques de código de markdown, ni saludes, ni agregues texto extra.";
+                finalPrompt += "\n\nIMPORTANTE: Devuelve ÚNICAMENTE un objeto JSON válido. No incluyas texto adicional ni bloques de formato.";
             }
 
             const payload = { contents: [{ parts: [{ text: finalPrompt }] }] };
@@ -97,8 +90,9 @@
                     if(!textResult) throw new Error('La IA devolvió una respuesta vacía.');
                     
                     if (expectJson) {
-                        // Limpiar backticks si la IA los incluye
-                        textResult = textResult.replace(/[\`]{3}json\n?/g, '').replace(/[\`]{3}\n?/g, '').trim();
+                        // Limpieza segura del JSON usando código ASCII para evitar el SyntaxError
+                        const tick3 = String.fromCharCode(96, 96, 96);
+                        textResult = textResult.replace(new RegExp(tick3 + 'json\n?', 'g'), '').replace(new RegExp(tick3 + '\n?', 'g'), '').trim();
                         return JSON.parse(textResult);
                     }
                     
@@ -130,6 +124,7 @@
           const [toast, setToast] = useState({ show: false, msg: '', type: 'success' });
           const [isAuthChecking, setIsAuthChecking] = useState(true);
           const [dbError, setDbError] = useState(''); 
+          const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
           const [loginEmail, setLoginEmail] = useState('');
           const [loginPassword, setLoginPassword] = useState('');
@@ -192,23 +187,7 @@
               setDbError(''); 
               const data = snapshot.docs.map(doc => {
                   const d = doc.data();
-                  let rawDate = d.date || d.fecha || d.Fecha || d.Date || d.fecha_evento || d.fechaEvento || d.fecha_reserva || d.dia || '';
-                  if (!rawDate && /^\d{4}-\d{2}-\d{2}$/.test(doc.id)) rawDate = doc.id;
-                  
-                  if (!rawDate) {
-                      for (const key in d) {
-                          if (typeof d[key] === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d[key])) {
-                              rawDate = d[key];
-                              break;
-                          }
-                      }
-                  }
-
-                  if (rawDate && (rawDate.includes('/') || (rawDate.includes('-') && rawDate.indexOf('-') <= 2))) {
-                      const sep = rawDate.includes('/') ? '/' : '-';
-                      const p = rawDate.split(sep);
-                      if (p.length === 3 && p[2].length >= 4) rawDate = `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
-                  }
+                  let rawDate = d.date || d.fecha || d.dia || '';
                   if (!rawDate && d.timestamp) {
                       try {
                           const dateObj = typeof d.timestamp === 'number' ? new Date(d.timestamp) : new Date(d.timestamp.toDate());
@@ -216,14 +195,14 @@
                       } catch(e) {}
                   }
 
-                  d._fechaStr = rawDate || '';
-                  d._nombreStr = d.cliente_nombre || d.nombre || d.Nombre || d.clientName || d.cliente || 'Sin Nombre';
-                  d._telefonoStr = d.cliente_telefono || d.telefono || d.Telefono || d.phone || d.celular || '';
-                  d._correoStr = d.cliente_correo || d.correo || d.email || d.Email || '';
-                  d._precioTotal = Number(d.precio_total || d.total || d.precio || d.costo || d.costo_total || d.Total || 0);
-                  d._anticipo = Number(d.anticipo || d.enganche || d.deposito || d.Anticipo || 0);
+                  d._fechaStr = rawDate || doc.id;
+                  d._nombreStr = d.cliente_nombre || d.nombre || 'Sin Nombre';
+                  d._telefonoStr = d.cliente_telefono || d.telefono || '';
+                  d._correoStr = d.cliente_correo || d.correo || '';
+                  d._precioTotal = Number(d.precio_total || d.total || 0);
+                  d._anticipo = Number(d.anticipo || d.enganche || 0);
                   
-                  d._status = d.status || d.estado || d.Estado || 'Pendiente';
+                  d._status = d.status || 'Pendiente';
                   if (d._precioTotal === 0) {
                       d._status = 'Liquidado'; 
                   } else if (d._anticipo >= d._precioTotal && d._precioTotal > 0) {
@@ -263,22 +242,7 @@
             const unsubExpenses = onSnapshot(expensesRef, (snapshot) => {
               const data = snapshot.docs.map(doc => {
                   const d = doc.data();
-                  let rawDate = d.date || d.fecha || d.Fecha || d.Date || d.dia || '';
-                  if (!rawDate && /^\d{4}-\d{2}-\d{2}$/.test(doc.id)) rawDate = doc.id;
-                  
-                  if (!rawDate) {
-                      for (const key in d) {
-                          if (typeof d[key] === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d[key])) {
-                              rawDate = d[key];
-                              break;
-                          }
-                      }
-                  }
-                  if (rawDate && (rawDate.includes('/') || (rawDate.includes('-') && rawDate.indexOf('-') <= 2))) {
-                      const sep = rawDate.includes('/') ? '/' : '-';
-                      const p = rawDate.split(sep);
-                      if (p.length === 3 && p[2].length >= 4) rawDate = `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
-                  }
+                  let rawDate = d.date || d.fecha || d.dia || '';
                   if (!rawDate && d.timestamp) {
                       try {
                           const dateObj = typeof d.timestamp === 'number' ? new Date(d.timestamp) : new Date(d.timestamp.toDate());
@@ -286,11 +250,11 @@
                       } catch(e) {}
                   }
 
-                  d._fechaStr = rawDate || '';
-                  d._monto = Number(d.amount || d.monto || d.cantidad || d.Total || d.total || 0);
-                  d._desc = d.description || d.descripcion || d.concepto || d.detalle || 'Sin descripción';
-                  d._cat = d.category || d.categoria || d.tipo || 'General';
-                  d._status = d.status || d.estado || d.estatus || 'Pagado';
+                  d._fechaStr = rawDate || doc.id;
+                  d._monto = Number(d.amount || d.monto || 0);
+                  d._desc = d.description || d.descripcion || 'Sin descripción';
+                  d._cat = d.category || d.categoria || 'General';
+                  d._status = d.status || 'Pagado';
                   
                   return { id: doc.id, ...d };
               });
@@ -371,52 +335,6 @@
           const totalExpenses = useMemo(() => expenses.filter(e => e._status === 'Pagado' || !e._status).reduce((sum, e) => sum + e._monto, 0), [expenses]);
           const netProfit = totalIncome - totalExpenses;
 
-          const chartData = useMemo(() => {
-            const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-            const data = months.map(name => ({ name, Ingresos: 0, Gastos: 0 }));
-            
-            bookings.forEach(b => {
-              if (b._status === 'Liquidado' || b._status === 'Anticipado' || b._status === 'Confirmada') {
-                let date;
-                if (b._fechaStr && b._fechaStr.includes('-')) {
-                    const p = b._fechaStr.split('-');
-                    date = new Date(p[0], p[1]-1, p[2]);
-                } else if (b.timestamp) {
-                    date = new Date(b.timestamp);
-                }
-                if (date && !isNaN(date.getMonth())) {
-                   data[date.getMonth()].Ingresos += (b._status === 'Liquidado' ? b._precioTotal : b._anticipo);
-                }
-              }
-            });
-
-            expenses.forEach(e => {
-              if (e._status === 'Pagado') {
-                let date;
-                if (e._fechaStr && e._fechaStr.includes('-')) {
-                    const p = e._fechaStr.split('-');
-                    date = new Date(p[0], p[1]-1, p[2]);
-                } else if (e.timestamp) {
-                    date = new Date(e.timestamp);
-                }
-                if (date && !isNaN(date.getMonth())) {
-                  data[date.getMonth()].Gastos += e._monto;
-                }
-              }
-            });
-            return data;
-          }, [bookings, expenses]);
-
-          const displayBookings = useMemo(() => {
-             const today = new Date().toISOString().split('T')[0];
-             let upcoming = bookings
-                .filter(b => b._fechaStr && b._fechaStr >= today)
-                .sort((a, b) => a._fechaStr < b._fechaStr ? -1 : 1)
-                .slice(0, 5);
-             if(upcoming.length === 0 && bookings.length > 0) upcoming = bookings.slice(0, 5);
-             return upcoming;
-          }, [bookings]);
-
           if (isAuthChecking) return (
             <div className="flex flex-col h-screen items-center justify-center bg-slate-900 text-white space-y-4">
               <Loader2 className="w-12 h-12 text-emerald-500 animate-spin" />
@@ -452,46 +370,65 @@
           );
 
           return (
-            <div className="flex h-screen bg-slate-50 font-sans text-slate-800 overflow-hidden">
-              <aside className="w-64 bg-slate-900 text-white flex flex-col shadow-xl z-20 shrink-0">
-                <div className="p-6 border-b border-slate-800 relative">
-                  <h1 className="text-2xl font-black tracking-tight text-emerald-400">Casa Copal</h1>
-                  <p className="text-[10px] text-slate-400 mt-1.5 uppercase tracking-widest font-bold">
-                    Admin <span className="mx-1 opacity-30">•</span> Powered by <span className="text-blue-400 font-black">VenueSync</span>
-                  </p>
+            <div className="flex flex-col md:flex-row h-screen bg-slate-50 text-slate-800 font-sans overflow-hidden">
+              
+              {/* ENCABEZADO MÓVIL */}
+              <div className="md:hidden bg-slate-900 text-white p-4 flex items-center justify-between shadow-md z-30 shrink-0">
+                <h1 className="text-xl font-black text-emerald-400">Casa Copal</h1>
+                <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-slate-300 hover:text-white">
+                  <Menu className="w-6 h-6" />
+                </button>
+              </div>
+
+              {/* FONDO OSCURO MÓVIL */}
+              {isMobileMenuOpen && (
+                <div className="fixed inset-0 bg-black/60 z-40 md:hidden backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)}></div>
+              )}
+
+              {/* BARRA LATERAL (SIDEBAR) */}
+              <aside className={`fixed md:static inset-y-0 left-0 w-64 bg-slate-900 text-white flex flex-col shadow-2xl md:shadow-xl z-50 shrink-0 transform transition-transform duration-300 ease-in-out ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+                <div className="p-6 border-b border-slate-800 flex justify-between items-start">
+                  <div>
+                    <h1 className="text-2xl font-black tracking-tight text-emerald-400">Casa Copal</h1>
+                    <p className="text-[10px] text-slate-400 mt-1.5 uppercase tracking-widest font-bold">Admin</p>
+                  </div>
+                  <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-slate-400 hover:text-white">
+                    <X className="w-6 h-6" />
+                  </button>
                 </div>
                 
-                <div className="p-4 bg-slate-800/50 flex items-center justify-between border-b border-slate-800">
-                  <div>
+                <div className="p-4 bg-slate-800/50 flex justify-between items-center border-b border-slate-800">
+                  <div className="truncate pr-2">
                     <p className="text-[10px] text-emerald-400 uppercase font-bold"><UserCircle className="inline w-3 h-3 mr-1"/> {activeProfile.role}</p>
-                    <p className="font-semibold text-sm truncate w-32">{activeProfile.name}</p>
+                    <p className="font-semibold text-sm truncate">{activeProfile.name}</p>
                   </div>
-                  <button onClick={handleLogout} className="p-2 hover:bg-rose-500 rounded-lg transition-colors text-slate-400 hover:text-white" title="Cerrar Sesión"><LogOut className="w-4 h-4"/></button>
+                  <button onClick={handleLogout} className="hover:text-rose-400 text-slate-400 transition-colors"><LogOut className="w-4 h-4"/></button>
                 </div>
 
                 <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
                   {activeProfile.canViewAll && (
                     <>
-                      <NavItem icon={<LayoutDashboard/>} label="Dashboard" isActive={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-                      <NavItem icon={<CalendarDays/>} label="Centro de Reservas" isActive={activeTab === 'bookings'} onClick={() => setActiveTab('bookings')} badge={bookings.filter(b => b._status === 'Pendiente' || b._status === 'Anticipado').length} />
-                      <NavItem icon={<FileText/>} label="Cotizaciones" isActive={activeTab === 'quotes'} onClick={() => setActiveTab('quotes')} />
+                      <NavBtn icon={<LayoutDashboard/>} label="Dashboard" tab="dashboard" activeTab={activeTab} setActiveTab={setActiveTab} close={() => setIsMobileMenuOpen(false)} />
+                      <NavBtn icon={<CalendarDays/>} label="Reservas" tab="bookings" activeTab={activeTab} setActiveTab={setActiveTab} close={() => setIsMobileMenuOpen(false)} badge={bookings.filter(b => b._status === 'Pendiente' || b._status === 'Anticipado').length} />
+                      <NavBtn icon={<FileText/>} label="Cotizaciones" tab="quotes" activeTab={activeTab} setActiveTab={setActiveTab} close={() => setIsMobileMenuOpen(false)} />
                     </>
                   )}
-                  <NavItem icon={<WalletCards/>} label="Gastos Operativos" isActive={activeTab === 'expenses'} onClick={() => setActiveTab('expenses')} />
+                  <NavBtn icon={<WalletCards/>} label="Gastos" tab="expenses" activeTab={activeTab} setActiveTab={setActiveTab} close={() => setIsMobileMenuOpen(false)} />
                   
                   {activeProfile.canViewAll && (
                     <>
-                      <NavItem icon={<Users/>} label="Clientes VIP" isActive={activeTab === 'clients'} onClick={() => setActiveTab('clients')} />
+                      <NavBtn icon={<Users/>} label="Clientes VIP" tab="clients" activeTab={activeTab} setActiveTab={setActiveTab} close={() => setIsMobileMenuOpen(false)} />
                       <div className="pt-4 mt-4 border-t border-slate-800">
                         <p className="text-xs font-bold text-slate-500 uppercase tracking-widest px-4 mb-2">Herramientas</p>
-                        <NavItem icon={<Megaphone/>} label="Hub de Ventas" isActive={activeTab === 'marketing'} onClick={() => setActiveTab('marketing')} />
+                        <NavBtn icon={<Megaphone/>} label="Hub Ventas" tab="marketing" activeTab={activeTab} setActiveTab={setActiveTab} close={() => setIsMobileMenuOpen(false)} />
                       </div>
                     </>
                   )}
                 </nav>
               </aside>
 
-              <main className="flex-1 overflow-y-auto relative">
+              {/* CONTENIDO PRINCIPAL */}
+              <main className="flex-1 overflow-y-auto p-4 md:p-8 relative">
                 {toast.show && (
                   <div className={`absolute top-6 right-6 z-50 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3 text-white transform transition-all ${toast.type === 'success' ? 'bg-emerald-600' : 'bg-rose-600'}`}>
                     {toast.type === 'success' ? <CheckCircle2 className="w-5 h-5"/> : <AlertCircle className="w-5 h-5"/>}
@@ -499,75 +436,65 @@
                   </div>
                 )}
 
-                <div className="p-8">
-                  {dbError && (
-                    <div className="bg-rose-100 border border-rose-400 text-rose-800 px-6 py-4 rounded-2xl mb-8 flex items-center gap-4 shadow-sm">
-                      <AlertCircle className="w-6 h-6 shrink-0 text-rose-600" />
-                      <p className="text-sm font-bold">{dbError}</p>
+                {dbError && (
+                  <div className="bg-rose-100 border border-rose-400 text-rose-800 px-6 py-4 rounded-2xl mb-8 flex items-center gap-4 shadow-sm">
+                    <AlertCircle className="w-6 h-6 shrink-0 text-rose-600" />
+                    <p className="text-sm font-bold">{dbError}</p>
+                  </div>
+                )}
+                
+                {activeTab === 'dashboard' && activeProfile.canViewAll && (
+                  <div className="animate-fade-in space-y-6 pb-10">
+                    <div>
+                      <h2 className="text-3xl font-black text-slate-800">Resumen Financiero</h2>
+                      <p className="text-slate-500 font-medium">Ingresos reales: <span className="text-emerald-600 font-bold">Anticipos + Eventos Liquidados</span>.</p>
                     </div>
-                  )}
 
-                  {activeTab === 'dashboard' && activeProfile.canViewAll && (
-                    <div className="animate-fade-in space-y-6">
-                      <div>
-                        <h2 className="text-3xl font-black text-slate-800">Resumen Financiero</h2>
-                        <p className="text-slate-500 font-medium">Ingresos reales (Dinero en caja): <span className="text-emerald-600 font-bold">Anticipos recibidos + Eventos Liquidados</span>.</p>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <StatCard title="Ingresos (Caja Real)" amount={totalIncome} icon={<TrendingUp/>} color="text-emerald-600 bg-emerald-50 border-emerald-100" />
-                        <StatCard title="Gastos (Pagados)" amount={totalExpenses} icon={<WalletCards/>} color="text-rose-600 bg-rose-50 border-rose-100" />
-                        <StatCard title="Utilidad (Profit)" amount={netProfit} icon={<LayoutDashboard/>} color="text-blue-600 bg-blue-50 border-blue-100" />
-                      </div>
-
-                      <DashboardChart data={chartData} />
-
-                      <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 mt-8">
-                          <h3 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-100 pb-3">Próximos Eventos</h3>
-                          <div className="overflow-x-auto pb-2">
-                              <table className="w-full text-left border-collapse min-w-[800px]">
-                                  <thead>
-                                      <tr className="bg-slate-50 text-slate-400 text-xs uppercase tracking-wider">
-                                          <th className="p-4 font-bold rounded-tl-xl">Fecha</th>
-                                          <th className="p-4 font-bold">Cliente</th>
-                                          <th className="p-4 font-bold">Total / Anticipo</th>
-                                          <th className="p-4 font-bold rounded-tr-xl text-right">Estado</th>
-                                      </tr>
-                                  </thead>
-                                  <tbody>
-                                      {displayBookings.map(b => (
-                                          <tr key={b.id} className="border-b border-slate-50 hover:bg-slate-50/80 transition-colors">
-                                              <td className="p-4 font-bold text-slate-700">{b._fechaStr || 'Sin Fecha Registrada'}</td>
-                                              <td className="p-4 text-sm font-bold text-slate-600">{b._nombreStr}</td>
-                                              <td className="p-4">
-                                                <p className="font-black text-slate-800">${b._precioTotal.toLocaleString('es-MX')}</p>
-                                                <p className="text-xs text-slate-500">Anticipo: ${b._anticipo.toLocaleString()}</p>
-                                              </td>
-                                              <td className="p-4 text-right">
-                                                <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-widest ${b._status === 'Liquidado' ? 'bg-emerald-100 text-emerald-700' : b._status === 'Anticipado' || b._status === 'Confirmada' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
-                                                  {b._status === 'Confirmada' ? 'ANTICIPADO' : (b._precioTotal === 0 ? 'CORTESÍA' : b._status)}
-                                                </span>
-                                              </td>
-                                          </tr>
-                                      ))}
-                                      {displayBookings.length === 0 && <tr><td colSpan="4" className="p-8 text-center text-slate-400">Sin eventos próximos</td></tr>}
-                                  </tbody>
-                              </table>
-                          </div>
-                      </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <StatCard title="Ingresos (Caja Real)" amount={totalIncome} icon={<TrendingUp/>} color="text-emerald-600 bg-emerald-50 border-emerald-100" />
+                      <StatCard title="Gastos (Pagados)" amount={totalExpenses} icon={<WalletCards/>} color="text-rose-600 bg-rose-50 border-rose-100" />
+                      <StatCard title="Utilidad (Profit)" amount={netProfit} icon={<LayoutDashboard/>} color="text-blue-600 bg-blue-50 border-blue-100" />
                     </div>
-                  )}
 
-                  {activeTab === 'bookings' && activeProfile.canViewAll && <BookingsModule db={db} bookings={bookings} showToast={showToast} initialData={quoteToConvert} clearInitialData={() => setQuoteToConvert(null)} />}
-                  
-                  {activeTab === 'quotes' && activeProfile.canViewAll && <QuotesModule db={db} quotes={quotes} showToast={showToast} onConvertToBooking={(q) => { setQuoteToConvert(q); setActiveTab('bookings'); }} />}
-
-                  {activeTab === 'expenses' && <ExpensesModule db={db} expenses={expenses} expenseCategories={expenseCategories} activeProfile={activeProfile} showToast={showToast} callGeminiAI={callGeminiAI} />}
-                  
-                  {activeTab === 'clients' && activeProfile.canViewAll && <ClientsModule db={db} clients={clients} clientNotes={clientNotes} showToast={showToast} />}
-                  
-                  {activeTab === 'marketing' && activeProfile.canViewAll && <MarketingHub handleCopyText={handleCopyText} showToast={showToast} callGeminiAI={callGeminiAI} />}
-                </div>
+                    <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-4 md:p-6 overflow-x-auto mt-8">
+                        <h3 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-100 pb-3">Próximos Eventos</h3>
+                        <table className="w-full text-left min-w-[600px]">
+                            <thead>
+                                <tr className="bg-slate-50 text-slate-400 text-xs uppercase tracking-wider">
+                                    <th className="p-3 font-bold rounded-tl-xl">Fecha</th>
+                                    <th className="p-3 font-bold">Cliente</th>
+                                    <th className="p-3 font-bold">Total / Anticipo</th>
+                                    <th className="p-3 font-bold rounded-tr-xl">Estado</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {bookings.filter(b => b._fechaStr >= new Date().toISOString().split('T')[0]).slice(0, 8).map(b => (
+                                    <tr key={b.id} className="border-b border-slate-50 hover:bg-slate-50/80 transition-colors">
+                                        <td className="p-3 font-bold text-slate-700">{b._fechaStr}</td>
+                                        <td className="p-3 text-sm font-bold text-slate-600">{b._nombreStr}</td>
+                                        <td className="p-3">
+                                          <p className="font-black text-slate-800">${b._precioTotal.toLocaleString()}</p>
+                                          <p className="text-xs text-slate-500">Ant: ${b._anticipo.toLocaleString()}</p>
+                                        </td>
+                                        <td className="p-3">
+                                          <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase ${b._status === 'Liquidado' ? 'bg-emerald-100 text-emerald-700' : b._status === 'Anticipado' || b._status === 'Confirmada' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+                                            {b._status}
+                                          </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                                {bookings.filter(b => b._fechaStr >= new Date().toISOString().split('T')[0]).length === 0 && <tr><td colSpan="4" className="p-8 text-center text-slate-400">Sin eventos próximos</td></tr>}
+                            </tbody>
+                        </table>
+                    </div>
+                  </div>
+                )}
+                
+                {activeTab === 'bookings' && activeProfile.canViewAll && <BookingsModule db={db} bookings={bookings} showToast={showToast} initialData={quoteToConvert} clearData={()=>setQuoteToConvert(null)} />}
+                {activeTab === 'quotes' && activeProfile.canViewAll && <QuotesModule db={db} quotes={quotes} showToast={showToast} onConv={(q)=>{setQuoteToConvert(q); setActiveTab('bookings');}} />}
+                {activeTab === 'expenses' && <ExpensesModule db={db} expenses={expenses} cats={expenseCategories} prof={activeProfile} showToast={showToast} callAI={callGeminiAI} />}
+                {activeTab === 'clients' && activeProfile.canViewAll && <ClientsModule db={db} clients={clients} notes={clientNotes} showToast={showToast} />}
+                {activeTab === 'marketing' && activeProfile.canViewAll && <MarketingHub copy={handleCopyText} showToast={showToast} callAI={callGeminiAI} />}
               </main>
             </div>
           );
@@ -577,69 +504,12 @@
         // SUB-COMPONENTES 
         // ============================================================================
 
-        function DashboardChart({ data }) {
-          const maxVal = Math.max(...data.map(d => Math.max(d.Ingresos, d.Gastos)), 5000); 
-          
-          return (
-            <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 mt-8">
-               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-8 gap-4">
-                  <div>
-                     <h3 className="text-xl font-black text-slate-800">Rendimiento Anual</h3>
-                     <p className="text-sm text-slate-500 font-medium">Comparativa de ingresos y gastos por mes.</p>
-                  </div>
-                  <div className="flex gap-4 bg-slate-50 p-2 px-4 rounded-xl border border-slate-100">
-                     <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-emerald-400 shadow-sm"></div>
-                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Ingresos</span>
-                     </div>
-                     <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-rose-400 shadow-sm"></div>
-                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Gastos</span>
-                     </div>
-                  </div>
-               </div>
-               
-               <div className="flex items-end h-64 gap-1 sm:gap-2">
-                  {data.map((d, i) => {
-                    const ingresoPercent = Math.max((d.Ingresos / maxVal) * 100, 1);
-                    const gastoPercent = Math.max((d.Gastos / maxVal) * 100, 1);
-                    
-                    return (
-                     <div key={i} className="flex-1 flex flex-col items-center gap-3 group relative h-full">
-                        <div className="opacity-0 group-hover:opacity-100 absolute -top-14 bg-slate-900 text-white text-[10px] font-bold p-2.5 rounded-xl pointer-events-none transition-opacity whitespace-nowrap z-10 shadow-xl border border-slate-700">
-                           <div className="flex justify-between gap-4"><span className="text-emerald-400">Ingresos:</span> <span>${d.Ingresos.toLocaleString()}</span></div>
-                           <div className="flex justify-between gap-4 mt-1"><span className="text-rose-400">Gastos:</span> <span>${d.Gastos.toLocaleString()}</span></div>
-                        </div>
-                        
-                        <div className="w-full flex justify-center items-end gap-0.5 sm:gap-1 h-full relative border-b-2 border-slate-100 pb-1">
-                           <div 
-                             className="w-full sm:w-1/2 bg-emerald-400 rounded-t-md hover:bg-emerald-500 transition-all duration-300 ease-out shadow-sm"
-                             style={{ height: `${ingresoPercent}%` }}
-                           ></div>
-                           <div 
-                             className="w-full sm:w-1/2 bg-rose-400 rounded-t-md hover:bg-rose-500 transition-all duration-300 ease-out shadow-sm"
-                             style={{ height: `${gastoPercent}%` }}
-                           ></div>
-                        </div>
-                        <span className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">{d.name}</span>
-                     </div>
-                  )})}
-               </div>
-            </div>
-          );
-        }
-
-        function NavItem({ icon, label, isActive, onClick, badge }) {
-          return (
-            <button onClick={onClick} className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all font-medium ${isActive ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-              <div className="flex items-center gap-3">
-                {React.cloneElement(icon, { className: 'w-5 h-5' })}
-                <span className="text-sm">{label}</span>
-              </div>
-              {badge > 0 && <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${isActive ? 'bg-white text-emerald-700' : 'bg-rose-500 text-white'}`}>{badge}</span>}
-            </button>
-          );
-        }
+        const NavBtn = ({icon, label, tab, activeTab, setActiveTab, close, badge}) => (
+          <button onClick={()=>{setActiveTab(tab); if(close) close();}} className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all font-medium ${activeTab === tab ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+            <div className="flex items-center gap-3">{React.cloneElement(icon,{className:'w-5 h-5'})} <span className="text-sm">{label}</span></div>
+            {badge > 0 && <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${activeTab === tab ? 'bg-white text-emerald-700' : 'bg-rose-500 text-white'}`}>{badge}</span>}
+          </button>
+        );
 
         function StatCard({ title, amount, icon, color }) {
           return (
@@ -655,957 +525,226 @@
           );
         }
 
-        function ClientsModule({ db, clients, clientNotes, showToast }) {
-          const [editingNoteId, setEditingNoteId] = useState(null);
-          const [noteText, setNoteText] = useState('');
-
-          const openNoteEditor = (clientId, currentNote) => {
-            setEditingNoteId(clientId);
-            setNoteText(currentNote || '');
-          };
-
-          const saveNote = async () => {
-            try {
-              await setDoc(doc(db, 'clientes', editingNoteId), { notas: noteText }, { merge: true });
-              showToast('Observaciones actualizadas correctamente');
-              setEditingNoteId(null);
-            } catch (err) {
-              console.error(err);
-              showToast('Error al guardar observaciones', 'error');
-            }
-          };
-
-          return (
-            <div className="animate-fade-in space-y-6 pb-20">
-              <h2 className="text-3xl font-black text-slate-800 mb-6">Directorio VIP (CRM)</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {clients.map(c => (
-                  <div key={c.id} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col">
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="text-lg font-black text-slate-800 truncate pr-2">{c.name}</h3>
-                      <a href={`https://wa.me/52${c.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="text-emerald-500 hover:text-emerald-600 transition-colors" title="Enviar WhatsApp">
-                        <i className="fa-brands fa-whatsapp text-xl"></i>
-                      </a>
-                    </div>
-                    <p className="text-sm text-slate-500 mb-4 font-medium">{c.phone}</p>
-                    
-                    <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-4">
-                      <div className="text-center">
-                        <span className="block text-[10px] uppercase font-bold text-slate-400">Eventos</span>
-                        <span className="font-black text-xl text-slate-700">{c.totalBookings}</span>
-                      </div>
-                      <div className="text-center">
-                        <span className="block text-[10px] uppercase font-bold text-slate-400">Inversión</span>
-                        <span className="font-black text-xl text-emerald-600">${c.totalSpent.toLocaleString()}</span>
-                      </div>
-                    </div>
-
-                    <div className="mt-auto pt-4 border-t border-slate-100">
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Observaciones</span>
-                        <button onClick={() => openNoteEditor(c.id, clientNotes[c.id])} className="text-xs text-blue-500 hover:text-blue-700 font-bold">
-                          <i className="fa-solid fa-pen"></i> Editar
-                        </button>
-                      </div>
-                      <p className="text-xs text-slate-600 italic bg-amber-50 p-3 rounded-lg border border-amber-100 min-h-[40px]">
-                        {clientNotes[c.id] || 'Sin observaciones registradas...'}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {editingNoteId && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-6">
-                    <h3 className="font-black text-xl text-slate-800 mb-2">Observaciones del Cliente</h3>
-                    <p className="text-xs text-slate-500 mb-4">Anota si hubo algún problema, detalle a considerar, o si son clientes excelentes.</p>
-                    <textarea 
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 text-sm text-slate-700 resize-none mb-4" 
-                      rows="4" 
-                      value={noteText} 
-                      onChange={(e) => setNoteText(e.target.value)}
-                      placeholder="Ej. Dejaron muy sucio, son clientes frecuentes..."
-                    ></textarea>
-                    <div className="flex gap-3">
-                      <button onClick={() => setEditingNoteId(null)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 rounded-xl transition-colors">Cancelar</button>
-                      <button onClick={saveNote} className="flex-1 py-3 bg-emerald-600 text-white font-bold hover:bg-emerald-700 rounded-xl transition-colors shadow-lg shadow-emerald-200">Guardar Notas</button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        }
-
-        function QuotesModule({ db, quotes, showToast, onConvertToBooking }) {
-          const [form, setForm] = useState({
-            name: '', phone: '', email: '', date: '', type: '', guests: '50', includesDepto: false, discount: 0
-          });
-
-          const d = form.date ? new Date(form.date + 'T12:00:00') : new Date();
-          const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+        function BookingsModule({ db, bookings, showToast, initialData, clearData }) {
+          const [form, setForm] = useState({ date:'', name:'', phone:'', email:'', isWknd:false, depto:false, disc:0, ant:'' });
+          const [editB, setEditB] = useState(null);
           
-          const salonPrice = isWknd ? 5000 : 4000;
-          const deptoPrice = isWknd ? 2000 : 1600;
-          const subtotal = salonPrice + (form.includesDepto ? deptoPrice : 0);
-          const discountAmount = subtotal * ((Number(form.discount) || 0) / 100);
-          const totalPrice = subtotal - discountAmount;
+          useEffect(() => { 
+            if(initialData) { 
+              const d = new Date(initialData.date+'T12:00:00'); 
+              setForm({date:initialData.date, name:initialData.cliente_nombre||'', phone:initialData.cliente_telefono||'', email:initialData.cliente_correo||'', isWknd:[0,5,6].includes(d.getDay()), depto:initialData.depto_incluido, disc:initialData.descuento_aplicado, ant:''}); 
+              clearData(); 
+            } 
+          }, [initialData]);
 
-          const handleSaveQuote = async (e) => {
-            e.preventDefault();
-            if (!form.name || !form.date) return showToast('Nombre y Fecha son obligatorios', 'error');
-            try {
-              await addDoc(collection(db, 'cotizaciones'), {
-                cliente_nombre: form.name,
-                cliente_telefono: form.phone,
-                cliente_correo: form.email,
-                date: form.date,
-                type: form.type,
-                guests: form.guests,
-                depto_incluido: form.includesDepto,
-                descuento_aplicado: Number(form.discount) || 0,
-                precio_total: totalPrice,
-                isWeekend: isWknd,
-                timestamp: Date.now()
-              });
-              showToast('Cotización guardada exitosamente');
-              setForm({ name: '', phone: '', email: '', date: '', type: '', guests: '50', includesDepto: false, discount: 0 });
-            } catch (err) {
-              console.error(err);
-              showToast('Error al guardar la cotización', 'error');
-            }
+          const calcTotal = useMemo(() => { 
+            let t = (form.isWknd ? 5000 : 4000) + (form.depto ? (form.isWknd ? 2000 : 1600) : 0); 
+            return t - (t * ((form.disc||0)/100)); 
+          }, [form]);
+
+          const exportCSV = () => { 
+            const csv = ['Fecha,Cliente,Telefono,Correo,Total,Anticipo,Estatus,Depto Incluido,Origen'].concat(bookings.map(b=>`${b._fechaStr},"${b._nombreStr}",${b._telefonoStr},${b._correoStr},${b._precioTotal},${b._anticipo},${b._status},${b.depto_incluido?'Si':'No'},${b.origen||'interno'}`)).join('\n'); 
+            const l=document.createElement('a'); 
+            l.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'})); 
+            l.download=`CasaCopal_Reservas_${new Date().toISOString().split('T')[0]}.csv`; 
+            l.click(); 
           };
 
-          const handleLoadQuote = (q) => {
-            setForm({
-              name: q.cliente_nombre || '',
-              phone: q.cliente_telefono || '',
-              email: q.cliente_correo || '',
-              date: q.date || '',
-              type: q.type || '',
-              guests: q.guests || '50',
-              includesDepto: q.depto_incluido || false,
-              discount: q.descuento_aplicado || 0
-            });
-            showToast('Cotización lista para generar PDF');
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+          const handleSave = async (e) => { 
+            e.preventDefault(); 
+            const a = Number(form.ant)||0; 
+            try{ 
+              await setDoc(doc(db,'reservaciones',form.date), {date:form.date, status:a>0?'Anticipado':'Pendiente', precio_total:calcTotal, anticipo:a, depto_incluido:form.depto, cliente_nombre:form.name, cliente_telefono:form.phone, cliente_correo:form.email, descuento_aplicado:form.disc, origen:'interno', timestamp:Date.now()}); 
+              showToast('Reserva Guardada'); 
+              setForm({date:'',name:'',phone:'',email:'',isWknd:false,depto:false,disc:0,ant:''}); 
+            }catch(e){showToast('Error','error');} 
           };
 
-          const handleDeleteQuote = async (id) => {
-            if(window.confirm('¿Eliminar esta cotización de forma permanente?')) {
-              try {
-                await deleteDoc(doc(db, 'cotizaciones', id));
-                showToast('Cotización eliminada');
-              } catch(err) { showToast('Error al eliminar', 'error'); }
-            }
+          const handleUpdate = async (e) => { 
+            e.preventDefault(); 
+            const t = Number(editB.precio_total); 
+            const a = Number(editB.anticipo); 
+            try{ 
+              await updateDoc(doc(db,'reservaciones',editB.id), {cliente_nombre:editB.cliente_nombre, cliente_telefono:editB.cliente_telefono, cliente_correo:editB.cliente_correo, precio_total:t, anticipo:a, status:t===0?'Liquidado':(a>=t&&t>0?'Liquidado':(a>0?'Anticipado':'Pendiente')), depto_incluido:editB.depto_incluido}); 
+              showToast('Actualizado'); 
+              setEditB(null); 
+            }catch(e){showToast('Error','error');} 
           };
 
-          const handleDownloadPDF = async () => {
-            const element = document.getElementById('quote-preview-doc');
-            if (!element || !window.html2canvas) return showToast('Error al generar PDF', 'error');
-            try {
-              showToast('Generando Documento Oficial...');
-              const canvas = await window.html2canvas(element, { scale: 3, useCORS: true, backgroundColor: '#ffffff' }); 
-              const link = document.createElement('a');
-              link.download = `Cotizacion_${form.name || 'CasaCopal'}.png`;
-              link.href = canvas.toDataURL('image/png');
-              link.click();
-            } catch (err) { showToast('Error al exportar', 'error'); }
-          };
+          const del = async (id) => { if(window.confirm('¿Eliminar reserva?')){ await deleteDoc(doc(db,'reservaciones',id)); showToast('Liberado'); } };
+          const liq = async (b) => { if(window.confirm('¿Liquidar evento?')){ await updateDoc(doc(db,'reservaciones',b.id),{status:'Liquidado',anticipo:Number(b._precioTotal)}); showToast('Liquidado'); } };
 
           return (
-            <div className="animate-fade-in space-y-6 pb-20">
-              <div>
-                <h2 className="text-3xl font-black text-slate-800">Cotizador Dinámico</h2>
-                <p className="text-slate-500 font-medium">Crea cotizaciones elegantes y conviértelas en reservas con un clic.</p>
+            <div className="space-y-6 animate-fade-in pb-10">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <h2 className="text-3xl font-black">Centro de Reservas</h2>
+                <button onClick={exportCSV} className="bg-emerald-600 text-white px-4 py-2 rounded-xl font-bold flex gap-2 items-center"><FileSpreadsheet className="w-4 h-4"/> Descargar a Excel</button>
               </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-                
-                <div className="space-y-8">
-                  <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-                    <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><i className="fa-solid fa-file-invoice text-blue-600"></i> Nueva Cotización</h3>
-                    <form onSubmit={handleSaveQuote} className="space-y-4">
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Cliente</label>
-                        <input type="text" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-sm font-bold text-slate-700" placeholder="Ej. Ana Pérez" value={form.name} onChange={e=>setForm({...form, name: e.target.value})} required/>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Teléfono</label>
-                          <input type="tel" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-sm" placeholder="Opcional" value={form.phone} onChange={e=>setForm({...form, phone: e.target.value})}/>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Fecha</label>
-                          <input type="date" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-sm" value={form.date} onChange={e=>setForm({...form, date: e.target.value})} required/>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tipo de Evento</label>
-                          <input type="text" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-sm" placeholder="Ej. Boda" value={form.type} onChange={e=>setForm({...form, type: e.target.value})}/>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Invitados</label>
-                          <input type="number" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-sm" value={form.guests} onChange={e=>setForm({...form, guests: e.target.value})}/>
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Correo Electrónico</label>
-                        <input type="email" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-sm" placeholder="Opcional" value={form.email} onChange={e=>setForm({...form, email: e.target.value})}/>
-                      </div>
-                      <div className="flex items-center gap-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                        <label className="flex items-center gap-2 text-sm font-bold text-slate-700 cursor-pointer">
-                          <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={form.includesDepto} onChange={e=>setForm({...form, includesDepto: e.target.checked})}/> + Depto Privado
-                        </label>
-                        <div className="flex-1">
-                           <input type="number" placeholder="Descuento %" className="w-full p-2 bg-white border border-slate-200 rounded-lg outline-none focus:border-blue-500 text-sm text-blue-700 font-bold" value={form.discount || ''} onChange={e=>setForm({...form, discount: e.target.value})}/>
-                        </div>
-                      </div>
-                      <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition-colors shadow-md shadow-blue-200">Guardar Cotización</button>
-                    </form>
-                  </div>
-
-                  <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                    <div className="p-4 border-b border-slate-100 bg-slate-50">
-                      <h3 className="font-bold text-slate-800 text-sm">Cotizaciones Guardadas</h3>
-                    </div>
-                    <div className="divide-y divide-slate-100 max-h-[400px] overflow-y-auto">
-                      {quotes.length === 0 ? <p className="p-6 text-center text-sm text-slate-400">No hay cotizaciones registradas</p> : quotes.map(q => (
-                        <div key={q.id} className="p-4 hover:bg-slate-50 flex justify-between items-center group">
-                          <div>
-                            <p className="font-bold text-slate-800 text-sm">{q.cliente_nombre}</p>
-                            <p className="text-xs text-slate-500"><i className="fa-regular fa-calendar mr-1"></i> {q.date} • ${q.precio_total?.toLocaleString()}</p>
-                          </div>
-                          <div className="flex flex-col gap-2 items-end">
-                            <div className="flex gap-2">
-                               <button onClick={() => handleLoadQuote(q)} className="text-[10px] bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg font-bold hover:bg-blue-200 transition-colors shadow-sm whitespace-nowrap"><i className="fa-solid fa-eye mr-1"></i> Ver / Exportar</button>
-                               <button onClick={() => onConvertToBooking(q)} className="text-[10px] bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg font-bold hover:bg-emerald-200 transition-colors shadow-sm whitespace-nowrap"><i className="fa-solid fa-bolt text-emerald-500 mr-1"></i> Convertir a Reserva</button>
-                            </div>
-                            <button onClick={() => handleDeleteQuote(q.id)} className="text-[9px] text-rose-400 hover:text-rose-600 hover:underline">Eliminar</button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-center gap-4">
-                  <div id="quote-preview-doc" className="bg-white p-10 border border-slate-200 shadow-xl w-full max-w-[450px] relative overflow-hidden" style={{ fontFamily: "'Montserrat', sans-serif" }}>
-                     <div className="absolute top-0 left-0 right-0 h-2 bg-emerald-600"></div>
-                     <div className="text-center pb-6 mb-6 border-b border-slate-100">
-                        <h1 className="text-3xl font-black text-slate-900 tracking-tight mb-1">CASA COPAL</h1>
-                        <p className="text-emerald-600 text-[10px] font-bold tracking-[0.3em] uppercase">Cotización Oficial</p>
-                        <p className="text-[9px] text-slate-400 mt-2 tracking-widest uppercase">ID: COT-{Date.now().toString().slice(-4)}</p>
-                     </div>
-
-                     <div className="bg-slate-50 p-4 rounded-xl mb-6">
-                        <div className="grid grid-cols-2 gap-4 text-xs">
-                           <div>
-                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Cliente</p>
-                             <p className="font-bold text-slate-800">{form.name || '_________________'}</p>
-                           </div>
-                           <div>
-                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Fecha Evento</p>
-                             <p className="font-bold text-slate-800">{form.date || '_________________'}</p>
-                           </div>
-                           <div>
-                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Tipo Evento</p>
-                             <p className="font-bold text-slate-800">{form.type || '_________________'}</p>
-                           </div>
-                           <div>
-                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Invitados</p>
-                             <p className="font-bold text-slate-800">{form.guests || '50'} Max</p>
-                           </div>
-                           <div className="col-span-2">
-                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Correo</p>
-                             <p className="font-bold text-slate-800 break-all">{form.email || '_________________'}</p>
-                           </div>
-                        </div>
-                     </div>
-
-                     <h4 className="text-[10px] font-black text-slate-800 uppercase tracking-widest mb-3 border-b-2 border-slate-900 inline-block pb-1">Desglose de Costos</h4>
-                     <div className="space-y-3 mb-8">
-                        <div className="flex justify-between items-center text-sm">
-                           <span className="text-slate-600 font-medium">Renta de Salón Principal (7 hrs)</span>
-                           <span className="font-bold text-slate-800">${salonPrice.toLocaleString('es-MX')}</span>
-                        </div>
-                        {form.includesDepto && (
-                           <div className="flex justify-between items-center text-sm">
-                              <span className="text-slate-600 font-medium">Departamento Privado</span>
-                              <span className="font-bold text-slate-800">${deptoPrice.toLocaleString('es-MX')}</span>
-                           </div>
-                        )}
-                        {Number(form.discount) > 0 && (
-                           <div className="flex justify-between items-center text-sm text-rose-500">
-                              <span className="font-medium">Descuento ({form.discount}%)</span>
-                              <span className="font-bold">-${discountAmount.toLocaleString('es-MX')}</span>
-                           </div>
-                        )}
-                        
-                        <div className="pt-3 border-t border-slate-200 flex justify-between items-center">
-                           <span className="text-sm font-black text-slate-900 uppercase tracking-wider">Total Acordado</span>
-                           <span className="text-2xl font-black text-emerald-600">${totalPrice.toLocaleString('es-MX')}</span>
-                        </div>
-                     </div>
-
-                     <div className="bg-slate-50 p-4 rounded-xl text-[9px] text-slate-500 leading-relaxed font-medium">
-                        <p className="mb-2"><strong className="text-slate-700">Términos y Condiciones:</strong></p>
-                        <ul className="list-disc pl-3 space-y-1">
-                          <li>Cotización válida por 7 días. Disponibilidad sujeta a confirmación.</li>
-                          <li>Para bloquear la fecha formalmente se requiere un anticipo del 50%.</li>
-                          <li>Se requiere un depósito en garantía de $1,500 MXN el día del evento (reembolsable).</li>
-                        </ul>
-                     </div>
-
-                     <div className="mt-8 text-center border-t border-slate-100 pt-4">
-                        <p className="text-[10px] font-bold text-slate-800 mb-1">WhatsApp: 624 320 3289</p>
-                        <p className="text-[9px] text-slate-400 tracking-widest"><i className="fa-solid fa-globe text-emerald-500"></i> {"www." + "casacopal.com.mx"}</p>
-                     </div>
-                  </div>
-
-                  <button onClick={handleDownloadPDF} className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 px-8 rounded-full transition-colors shadow-lg flex items-center gap-2 w-full max-w-[450px] justify-center">
-                    <i className="fa-solid fa-download"></i> Exportar a Imagen Oficial
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        }
-
-        function BookingsModule({ db, bookings, showToast, initialData, clearInitialData }) {
-          const [form, setForm] = useState({ date: '', name: '', phone: '', email: '', isWeekend: false, includesDepto: false, discount: 0, anticipo: '' });
-          const [bookingToFree, setBookingToFree] = useState(null); 
-          const [editingBooking, setEditingBooking] = useState(null); 
-          const [bookingToLiquidate, setBookingToLiquidate] = useState(null);
-          
-          useEffect(() => {
-            if (initialData) {
-              const d = new Date(initialData.date + 'T12:00:00');
-              const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-              setForm(prev => ({...prev, date: initialData.date, name: initialData.cliente_nombre, phone: initialData.cliente_telefono, email: initialData.cliente_correo || '', includesDepto: initialData.depto_incluido, discount: initialData.descuento_aplicado, isWeekend: isWknd}));
-              showToast('Datos de cotización cargados en el formulario');
-              clearInitialData();
-            }
-          }, []);
-
-          const calculatedTotal = useMemo(() => {
-            let base = form.isWeekend ? 5000 : 4000;
-            let depto = form.isWeekend ? 2000 : 1600;
-            let subtotal = base + (form.includesDepto ? depto : 0);
-            return subtotal - (subtotal * ((form.discount || 0) / 100));
-          }, [form.isWeekend, form.includesDepto, form.discount]);
-
-          const handleExportReservationsToCSV = () => {
-            if (bookings.length === 0) {
-              showToast('No hay reservas para exportar', 'error');
-              return;
-            }
-
-            const headers = ['Fecha', 'Cliente', 'Teléfono', 'Correo', 'Total', 'Anticipo', 'Estatus', 'Depto Incluido', 'Origen'];
-            const csvData = bookings.map(b => [
-              b._fechaStr || '',
-              `"${b._nombreStr || ''}"`,
-              b._telefonoStr || '',
-              b._correoStr || '',
-              b._precioTotal || 0,
-              b._anticipo || 0,
-              b._status || '',
-              b.depto_incluido ? 'Sí' : 'No',
-              b.origen || ''
-            ]);
-
-            const csvContent = [headers.join(','), ...csvData.map(row => row.join(','))].join('\n');
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.setAttribute("href", url);
-            link.setAttribute("download", `CasaCopal_Reservas_${new Date().toISOString().split('T')[0]}.csv`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            showToast('Archivo de reservas descargado');
-          };
-
-          const handleBlockDate = async (e) => {
-            e.preventDefault();
-            if (!form.date) return showToast('Selecciona una fecha', 'error');
-
-            const isDateAlreadyBooked = bookings.some(b => b._fechaStr === form.date);
-            if (isDateAlreadyBooked) return showToast('⚠️ ¡Alto! Esta fecha ya está reservada o bloqueada.', 'error');
-
-            const anticipoNum = Number(form.anticipo) || 0;
-            const newStatus = anticipoNum > 0 ? 'Anticipado' : 'Pendiente';
-
-            try {
-              await setDoc(doc(db, 'reservaciones', form.date), { 
-                date: form.date, 
-                status: newStatus,
-                precio_total: calculatedTotal,
-                anticipo: anticipoNum,
-                depto_incluido: form.includesDepto,
-                cliente_nombre: form.name || 'Bloqueo Interno',
-                cliente_telefono: form.phone || '',
-                cliente_correo: form.email || '',
-                descuento_aplicado: form.discount || 0,
-                origen: 'hub_interno',
-                timestamp: new Date().toISOString()
-              });
-              showToast(anticipoNum > 0 ? 'Fecha reservada' : 'Fecha bloqueada');
-              setForm({ date: '', name: '', phone: '', email: '', isWeekend: false, includesDepto: false, discount: 0, anticipo: '' });
-            } catch(err) { console.error(err); showToast('Error al bloquear', 'error'); }
-          };
-
-          const handleApproveWebBooking = async (id) => {
-            const amount = window.prompt("Ingresa el monto del anticipo recibido ($) - Ingresa 0 si aún no han pagado:", "2500");
-            if (amount !== null) {
-              const anticipoNum = Number(amount) || 0;
-              const newStatus = anticipoNum > 0 ? 'Anticipado' : 'Pendiente';
-              try {
-                await updateDoc(doc(db, 'reservaciones', id), { status: newStatus, anticipo: anticipoNum });
-                showToast(anticipoNum > 0 ? 'Reserva aprobada.' : 'Reserva Pendiente.');
-              } catch(err) { console.error(err); }
-            }
-          };
-
-          const confirmLiquidar = async () => {
-            if (!bookingToLiquidate) return;
-            try {
-              await updateDoc(doc(db, 'reservaciones', bookingToLiquidate.id), { status: 'Liquidado', anticipo: Number(bookingToLiquidate._precioTotal) });
-              showToast('Evento Liquidado Exitosamente');
-              setBookingToLiquidate(null);
-            } catch(err) { console.error(err); showToast('Error al liquidar', 'error'); }
-          };
-
-          const confirmFreeDate = async () => {
-            if (!bookingToFree) return;
-            try {
-              await deleteDoc(doc(db, 'reservaciones', bookingToFree.id)); 
-              showToast('Fecha liberada');
-              setBookingToFree(null); 
-            } catch(err) { console.error(err); showToast('Error al liberar', 'error'); }
-          };
-
-          const handleUpdateBooking = async (e) => {
-            e.preventDefault();
-            if (!editingBooking) return;
-
-            const total = Number(editingBooking.precio_total);
-            const anticipo = Number(editingBooking.anticipo);
-            
-            let newStatus = 'Pendiente';
-            if (total === 0) newStatus = 'Liquidado'; 
-            else if (anticipo >= total && total > 0) newStatus = 'Liquidado';
-            else if (anticipo > 0) newStatus = 'Anticipado';
-
-            try {
-              await updateDoc(doc(db, 'reservaciones', editingBooking.id), { 
-                cliente_nombre: editingBooking.cliente_nombre,
-                cliente_telefono: editingBooking.cliente_telefono || '',
-                cliente_correo: editingBooking.cliente_correo || '',
-                date: editingBooking.date, 
-                precio_total: total,
-                anticipo: anticipo,
-                status: newStatus,
-                depto_incluido: editingBooking.depto_incluido || false
-              });
-              showToast('Reserva actualizada correctamente');
-              setEditingBooking(null);
-            } catch(err) {
-              console.error(err);
-              showToast('Error al actualizar', 'error');
-            }
-          };
-
-          const handleEditDeptoToggle = (e) => {
-            const isChecked = e.target.checked;
-            const d = new Date(editingBooking.date + 'T12:00:00');
-            const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-            const deptoPrice = isWknd ? 2000 : 1600;
-            const discount = Number(editingBooking.descuento_aplicado || 0);
-            const deptoFinalPrice = deptoPrice - (deptoPrice * (discount / 100));
-
-            setEditingBooking(prev => ({
-              ...prev, depto_incluido: isChecked, precio_total: Math.round(isChecked ? Number(prev.precio_total) + deptoFinalPrice : Number(prev.precio_total) - deptoFinalPrice)
-            }));
-          };
-
-          return (
-            <div className="animate-fade-in space-y-6">
-              <div className="flex justify-between items-end">
-                <div>
-                  <h2 className="text-3xl font-black text-slate-800">Centro de Reservas</h2>
-                  <p className="text-slate-500">Unificación de Página Web y Bloqueos Manuales.</p>
-                </div>
-                <button onClick={handleExportReservationsToCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center gap-2">
-                  <FileSpreadsheet className="w-4 h-4"/> Descargar a Excel
-                </button>
-              </div>
-
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><i className="fa-solid fa-lock text-emerald-600"></i> Agendar Evento y Anticipo</h3>
-                <form onSubmit={handleBlockDate} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="md:col-span-2">
-                      <label className="block text-xs font-bold text-slate-500 mb-1">Nombre del Cliente</label>
-                      <input type="text" placeholder="Ej. Familia López" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required/>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-1">Teléfono</label>
-                      <input type="tel" placeholder="Ej. 624..." className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-1">Correo (Opcional)</label>
-                      <input type="email" placeholder="correo@..." className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 items-end">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-1">Fecha</label>
-                      <input type="date" required className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.date} onChange={e => {
-                        const d = new Date(e.target.value + 'T12:00:00');
-                        const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-                        setForm({...form, date: e.target.value, isWeekend: isWknd});
-                      }} />
-                    </div>
-                    <div className="flex items-center justify-center h-[44px]">
-                      <label className="flex items-center gap-2 text-sm font-bold cursor-pointer text-slate-700 bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-lg w-full">
-                        <input type="checkbox" className="w-4 h-4 text-emerald-600 rounded" checked={form.includesDepto} onChange={e => setForm({...form, includesDepto: e.target.checked})} /> + Depto
-                      </label>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-blue-600 mb-1">Descuento (%)</label>
-                      <input type="number" min="0" max="100" placeholder="0" className="w-full p-2.5 bg-blue-50 border border-blue-200 text-blue-700 font-bold rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm" value={form.discount || ''} onChange={e => setForm({...form, discount: e.target.value})} />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-emerald-600 mb-1">Anticipo ($)</label>
-                      <input type="number" required placeholder="0" className="w-full p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.anticipo} onChange={e => setForm({...form, anticipo: e.target.value})} />
-                      <p className="text-[10px] text-slate-500 mt-1 font-bold absolute">Total: ${calculatedTotal.toLocaleString()}</p>
-                    </div>
-                    <div className="col-span-2 md:col-span-1">
-                      <button type="submit" className="bg-slate-900 text-white font-bold py-2.5 rounded-lg hover:bg-slate-800 transition-colors w-full flex items-center justify-center gap-2 shadow-md">
-                        <i className="fa-solid fa-save"></i> Guardar
-                      </button>
-                    </div>
-                  </div>
-                </form>
-              </div>
-
-              <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-                <div className="bg-white border-b border-slate-100 px-8 py-6 flex justify-between items-center">
-                  <h3 className="font-black text-xl text-slate-800">Próximos Eventos</h3>
-                  <span className="text-xs text-slate-400 font-bold uppercase tracking-widest"><i className="fa-solid fa-arrow-down-1-9"></i> Orden cronológico</span>
-                </div>
-                <div className="overflow-x-auto pb-2">
-                  <table className="w-full text-left border-collapse min-w-[950px]">
-                    <thead>
-                      <tr className="text-slate-400 text-xs font-bold uppercase tracking-widest border-b border-slate-100">
-                        <th className="p-6 font-bold w-12 text-center"></th>
-                        <th className="p-6 font-bold w-32">Fecha</th>
-                        <th className="p-6 font-bold">Cliente / Info</th>
-                        <th className="p-6 font-bold text-center">Estado</th>
-                        <th className="p-6 font-bold w-48">Finanzas</th>
-                        <th className="p-6 font-bold text-right w-48">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {bookings.length === 0 ? (
-                        <tr><td colSpan="6" className="p-12 text-center text-slate-400 font-bold">Sin eventos en la base de datos</td></tr>
-                      ) : bookings.map(b => {
-                        const total = b._precioTotal;
-                        const anticipo = b._anticipo;
-                        const saldo = total - anticipo;
-                        const status = b._status === 'Confirmada' ? 'Anticipado' : b._status; 
-                        
-                        return (
-                        <tr key={b.id} className={`hover:bg-slate-50/50 transition-colors ${b._fechaStr && b._fechaStr < new Date().toISOString().split('T')[0] ? 'opacity-60' : ''}`}>
-                          <td className="p-6 align-top text-center">
-                            <button onClick={() => setEditingBooking({...b, date: b._fechaStr, cliente_nombre: b._nombreStr, cliente_telefono: b._telefonoStr, cliente_correo: b._correoStr, precio_total: b._precioTotal, anticipo: b._anticipo})} className="w-10 h-10 bg-slate-200 text-slate-700 hover:bg-emerald-100 hover:text-emerald-700 rounded-full transition-colors flex items-center justify-center shadow-md mx-auto" title="Editar Reserva">
-                              <i className="fa-solid fa-pen text-base"></i>
-                            </button>
-                          </td>
-                          <td className="p-6 align-top text-center">
-                            {status === 'Liquidado' ? (
-                              <span className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-widest block"><i className="fa-solid fa-check-double mr-1"></i> {b._precioTotal === 0 ? 'Cortesía' : 'Liquidado'}</span>
-                            ) : status === 'Anticipado' ? (
-                              <span className="bg-blue-100 text-blue-700 border border-blue-200 px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-widest block"><i className="fa-solid fa-bookmark mr-1"></i> Anticipo Pagado</span>
-                            ) : (
-                              <span className="bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-widest block"><i className="fa-regular fa-clock mr-1"></i> Pendiente</span>
-                            )}
-                          </td>
-                          <td className="p-6 align-top">
-                            <span className="font-black text-slate-800 text-lg">{b._fechaStr || 'Sin Fecha'}</span>
-                            <div className="mt-2">
-                              {b.origen === 'Web' ? 
-                                <span className="inline-block bg-purple-50 text-purple-700 border border-purple-100 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest"><i className="fa-solid fa-globe"></i> Web</span> : 
-                                <span className="inline-block bg-slate-50 text-slate-600 border border-slate-200 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest"><i className="fa-solid fa-mobile-screen"></i> Hub</span>
-                              }
-                            </div>
-                          </td>
-                          <td className="p-6 align-top">
-                            <p className="font-black text-slate-800 mb-2 text-sm">{b._nombreStr}</p>
-                            <div className="flex flex-col gap-1.5">
-                              {b._telefonoStr && (
-                                <a href={`https://wa.me/52${b._telefonoStr.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[10px] text-emerald-700 font-bold bg-emerald-50 border border-emerald-100 px-2 py-1 rounded w-fit hover:bg-emerald-100 transition-colors shadow-sm" title="Abrir chat de WhatsApp"><i className="fa-brands fa-whatsapp text-emerald-500 text-sm"></i> {b._telefonoStr}</a>
-                              )}
-                              {b._correoStr && (
-                                <span className="inline-flex items-center gap-1.5 text-[10px] text-slate-500 font-medium"><i className="fa-regular fa-envelope text-slate-400"></i> {b._correoStr}</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-6 align-top">
-                            <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 relative">
-                              <div className="flex justify-between items-start mb-1 gap-2">
-                                <p className="text-xs text-slate-500 font-medium">Total: <strong className="text-slate-800">${total.toLocaleString()}</strong></p>
-                                <div className="shrink-0">{b.depto_incluido ? <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest shadow-sm whitespace-nowrap">+ Depto</span> : <span className="bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest shadow-sm whitespace-nowrap">Solo Salón</span>}</div>
-                              </div>
-                              <p className="text-xs text-slate-500 font-medium mb-1">Anticipo: <strong className="text-emerald-600">${anticipo.toLocaleString()}</strong></p>
-                              {status !== 'Liquidado' && <p className="text-xs text-rose-500 font-bold border-t border-slate-200 pt-1 mt-1">Saldo: ${saldo.toLocaleString()}</p>}
-                            </div>
-                          </td>
-                          <td className="p-6 align-top text-right">
-                            <div className="flex flex-col items-end gap-2">
-                              {status === 'Liquidado' ? (
-                                <span className="text-[10px] text-slate-400 font-bold"><i className="fa-solid fa-lock"></i> Pago Completo</span>
-                              ) : status === 'Anticipado' ? (
-                                <button onClick={() => setBookingToLiquidate(b)} className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-full hover:bg-emerald-700 transition-colors shadow-md flex items-center gap-1.5"><i className="fa-solid fa-hand-holding-dollar"></i> Liquidar Saldo</button>
-                              ) : (
-                                <button onClick={() => handleApproveWebBooking(b.id)} className="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-full hover:bg-emerald-600 transition-colors shadow-md flex items-center gap-1.5"><i className="fa-solid fa-check"></i> Aprobar</button>
-                              )}
-                              {(status === 'Anticipado' || status === 'Pendiente') && (
-                                <button onClick={() => setBookingToFree(b)} className="text-[10px] text-rose-400 hover:text-rose-600 font-bold hover:underline transition-colors mt-2">Liberar Fecha</button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      )})}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Modales Reserva */}
-              {editingBooking && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden">
-                    <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center">
-                      <div><h3 className="font-black text-xl text-slate-800">Editar Reserva</h3><p className="text-xs text-slate-500 mt-1 font-bold">Fecha: {editingBooking.date || 'Sin asignar'}</p></div>
-                      <button onClick={() => setEditingBooking(null)} className="w-8 h-8 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"><i className="fa-solid fa-xmark"></i></button>
-                    </div>
-                    <form onSubmit={handleUpdateBooking} className="p-6 space-y-4">
-                      <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Nombre del Cliente</label><input type="text" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={editingBooking.cliente_nombre} onChange={e => setEditingBooking({...editingBooking, cliente_nombre: e.target.value})} required/></div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Teléfono</label><input type="tel" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={editingBooking.cliente_telefono} onChange={e => setEditingBooking({...editingBooking, cliente_telefono: e.target.value})} /></div>
-                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Correo (Opcional)</label><input type="email" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={editingBooking.cliente_correo || ''} onChange={e => setEditingBooking({...editingBooking, cliente_correo: e.target.value})} /></div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Importe Total ($)</label><input type="number" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-black text-slate-800" value={editingBooking.precio_total} onChange={e => setEditingBooking({...editingBooking, precio_total: e.target.value})} required/></div>
-                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Anticipo ($)</label><input type="number" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-black text-emerald-600" value={editingBooking.anticipo || 0} onChange={e => setEditingBooking({...editingBooking, anticipo: e.target.value})} required/></div>
-                      </div>
-                      <div className="flex items-center gap-2"><label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer"><input type="checkbox" className="w-4 h-4 text-emerald-600 rounded" checked={editingBooking.depto_incluido || false} onChange={handleEditDeptoToggle} /> Incluye Departamento</label></div>
-                      <button type="submit" className="w-full bg-slate-900 text-white font-bold py-3.5 rounded-xl mt-4 hover:bg-emerald-600 transition-colors shadow-lg flex justify-center items-center gap-2">Guardar Cambios</button>
-                    </form>
-                  </div>
-                </div>
-              )}
-              {bookingToLiquidate && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-                  <div className="bg-white p-8 rounded-3xl max-w-sm w-full text-center shadow-2xl">
-                    <h3 className="text-xl font-black text-slate-800 mb-2">¿Liquidar Evento?</h3>
-                    <p className="text-slate-500 text-sm mb-6">El anticipo se igualará al precio total del evento y se registrará como <strong className="text-emerald-700">Liquidado</strong>.</p>
-                    <div className="flex gap-3"><button onClick={() => setBookingToLiquidate(null)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 rounded-xl">Cancelar</button><button onClick={confirmLiquidar} className="flex-1 py-3 bg-emerald-600 text-white font-bold hover:bg-emerald-700 rounded-xl">Sí, liquidar</button></div>
-                  </div>
-                </div>
-              )}
-              {bookingToFree && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-                  <div className="bg-white p-8 rounded-3xl max-w-sm w-full text-center shadow-2xl">
-                    <h3 className="text-xl font-black text-slate-800 mb-2">¿Liberar Fecha?</h3>
-                    <p className="text-slate-500 text-sm mb-6">Se eliminará la reserva. El día volverá a estar disponible en la web.</p>
-                    <div className="flex gap-3"><button onClick={() => setBookingToFree(null)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 rounded-xl">Cancelar</button><button onClick={confirmFreeDate} className="flex-1 py-3 bg-rose-600 text-white font-bold hover:bg-rose-700 rounded-xl">Sí, liberar</button></div>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        }
-
-        function ExpensesModule({ db, expenses, expenseCategories, activeProfile, showToast, callGeminiAI }) {
-          const [form, setForm] = useState({ date: new Date().toISOString().split('T')[0], category: '', amount: '', description: '', status: 'Pagado', notes: '' });
-          const [editingExpense, setEditingExpense] = useState(null);
-          const [showCatModal, setShowCatModal] = useState(false);
-          const [newCatName, setNewCatName] = useState('');
-          const [aiPrompt, setAiPrompt] = useState('');
-          const [isAiLoading, setIsAiLoading] = useState(false);
-
-          useEffect(() => { if (expenseCategories.length > 0 && !form.category) setForm(f => ({ ...f, category: expenseCategories[0].name })); }, [expenseCategories]);
-
-          const handleExportExpensesToCSV = () => {
-            if (expenses.length === 0) return showToast('No hay gastos para exportar', 'error');
-            const csvContent = ['Fecha,Descripción,Categoría,Estado,Monto,Registrado Por,Observaciones'].concat(
-              expenses.map(e => `${e._fechaStr},"${e._desc}",${e._cat},${e._status},${e._monto},"${e.recordedBy||''}","${e.notes||''}"`)
-            ).join('\n');
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = `CasaCopal_Gastos_${new Date().toISOString().split('T')[0]}.csv`;
-            link.click();
-            showToast('Archivo de gastos descargado');
-          };
-
-          const handleSaveExpense = async (e) => {
-            e.preventDefault();
-            try {
-              if (editingExpense) {
-                await updateDoc(doc(db, 'gastos', editingExpense.id), { date: editingExpense.date, category: editingExpense.category, amount: Number(editingExpense.amount), description: editingExpense.description, status: editingExpense.status, notes: editingExpense.notes || '' });
-                showToast('Gasto actualizado'); setEditingExpense(null);
-              } else {
-                await addDoc(collection(db, 'gastos'), { ...form, category: form.category || (expenseCategories[0]?.name || 'General'), amount: Number(form.amount), recordedBy: activeProfile.name, timestamp: Date.now() });
-                showToast('Gasto registrado');
-              }
-              setForm({ date: new Date().toISOString().split('T')[0], category: expenseCategories[0]?.name || '', amount: '', description: '', status: 'Pagado', notes: '' });
-              setAiPrompt('');
-            } catch(err) { showToast('Error al guardar: ' + err.message, 'error'); }
-          };
-
-          const handleEdit = (expense) => {
-            try {
-              setEditingExpense({ id: expense.id, date: expense._fechaStr || expense.date || new Date().toISOString().split('T')[0], category: expense._cat || expense.category || '', amount: String(expense._monto ?? expense.amount ?? 0), description: expense._desc || expense.description || '', status: expense._status || expense.status || 'Pagado', notes: expense.notes || '' });
-            } catch (err) { showToast("No se pudo abrir el gasto para edición", "error"); }
-          };
-
-          const handleDeleteExpense = async (id) => { if (window.confirm('¿Eliminar gasto de forma permanente?')) { try { await deleteDoc(doc(db, 'gastos', id)); showToast('Gasto eliminado exitosamente'); } catch (err) { showToast('Error al eliminar', 'error'); } } };
-          const handleAddCategory = async () => { if (!newCatName.trim()) return; try { await addDoc(collection(db, 'categorias_gastos'), { name: newCatName.trim() }); setNewCatName(''); showToast('Categoría agregada'); } catch (err) { showToast('Error', 'error'); } };
-          const handleDeleteCategory = async (id) => { if (window.confirm('¿Eliminar esta categoría?')) { try { await deleteDoc(doc(db, 'categorias_gastos', id)); showToast('Categoría eliminada'); } catch (err) { showToast('Error', 'error'); } } };
-
-          const handleAIParse = async () => {
-              if(!aiPrompt.trim()) return showToast('Escribe algo primero', 'error');
-              setIsAiLoading(true);
-              try {
-                  const catList = expenseCategories.map(c => c.name).join(', ');
-                  const result = await callGeminiAI(`Analiza este texto de un gasto de un salón de eventos y extrae los datos en formato JSON estricto con las claves: "monto" (solo números), "descripcion" (texto breve capitalizado), y "categoria" (debes elegir exactamente UNA de esta lista: ${catList}. Si ninguna cuadra usa "General"). Texto: "${aiPrompt}"`, true);
-                  if(result && result.monto) { setForm(p => ({...p, amount: result.monto.toString(), description: result.descripcion || p.description, category: result.categoria || p.category})); showToast('✨ Formulario autocompletado'); }
-              } catch (err) { showToast('IA: ' + (err.message || 'Error desconocido'), 'error'); } finally { setIsAiLoading(false); }
-          };
-
-          return (
-            <div className="animate-fade-in space-y-6 relative">
-              <div className="flex justify-between items-end">
-                <div><h2 className="text-3xl font-black text-slate-800">Gastos Operativos</h2><p className="text-slate-500 font-medium">Solo los gastos <span className="text-emerald-600 font-bold">Pagados</span> se restarán de tus utilidades.</p></div>
-                <button onClick={handleExportExpensesToCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center gap-2"><FileSpreadsheet className="w-4 h-4"/> Descargar a Excel</button>
-              </div>
-              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-2xl shadow-sm border border-indigo-100 flex flex-col md:flex-row gap-4 items-center">
-                  <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm shrink-0"><Sparkles className="text-indigo-500 w-6 h-6" /></div>
-                  <div className="flex-1 w-full"><h4 className="text-sm font-bold text-indigo-900 mb-1">Registro Mágico</h4>
-                      <div className="flex gap-2">
-                          <input type="text" placeholder='Ej. "Compré cloro en Walmart por 500 pesos"' className="w-full p-3 bg-white border border-indigo-200 rounded-xl focus:ring-2 focus:ring-indigo-400 outline-none text-sm text-slate-700" value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAIParse()} />
-                          <button onClick={handleAIParse} disabled={isAiLoading} className="bg-indigo-600 text-white font-bold px-6 rounded-xl hover:bg-indigo-700 transition-colors shrink-0 shadow-md disabled:opacity-50 flex items-center justify-center min-w-[150px]">{isAiLoading ? <Loader2 className="w-5 h-5 animate-spin mx-auto"/> : '✨ Autocompletar'}</button>
-                      </div>
-                  </div>
-              </div>
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <form onSubmit={handleSaveExpense} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="flex justify-between items-center text-xs font-bold text-slate-500 mb-1">Categoría <button type="button" onClick={() => setShowCatModal(true)} className="text-emerald-600 hover:text-emerald-700 flex items-center gap-1"><Settings className="w-3 h-3"/> Administrar</button></label>
-                      <select required className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.category} onChange={e=>setForm({...form, category: e.target.value})}>{expenseCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
-                    </div>
-                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Monto ($)</label><input type="number" required min="1" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.amount} onChange={e=>setForm({...form, amount: e.target.value})}/></div>
-                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Descripción</label><input type="text" required placeholder="Ej. Pintura blanca" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.description} onChange={e=>setForm({...form, description: e.target.value})}/></div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Estado</label><select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.status} onChange={e=>setForm({...form, status: e.target.value})}><option value="Pagado">Pagado</option><option value="Adeudo">Adeudo</option></select></div>
-                    <div className="md:col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Observaciones (Opcional)</label><input type="text" placeholder="Ej. Factura pendiente" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})}/></div>
-                    <div><button type="submit" className="w-full bg-slate-900 text-white font-bold py-2.5 px-4 rounded-lg hover:bg-slate-800 transition-colors shadow-md">Guardar Nuevo</button></div>
-                  </div>
-                </form>
-              </div>
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                <table className="w-full text-left">
-                  <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-bold border-b border-slate-200"><tr><th className="p-4 text-center w-24">Acciones</th><th className="p-4">Fecha</th><th className="p-4">Descripción</th><th className="p-4">Categoría</th><th className="p-4 text-center">Estado</th><th className="p-4 text-right">Monto</th><th className="p-4">Observaciones</th></tr></thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {expenses.length === 0 ? ( <tr><td colSpan="7" className="p-8 text-center text-slate-400">Sin gastos registrados</td></tr>
-                    ) : expenses.map(e => (
-                      <tr key={e.id} className="hover:bg-slate-50">
-                        <td className="p-4 text-center"><div className="flex items-center justify-center gap-2"><button type="button" onClick={() => handleEdit(e)} className="w-8 h-8 bg-slate-200 text-slate-700 hover:bg-blue-100 hover:text-blue-700 rounded-full flex items-center justify-center shadow-sm"><i className="fa-solid fa-pen text-sm"></i></button><button type="button" onClick={() => handleDeleteExpense(e.id)} className="w-8 h-8 bg-slate-200 text-slate-700 hover:bg-rose-100 hover:text-rose-700 rounded-full flex items-center justify-center shadow-sm"><i className="fa-solid fa-trash text-sm"></i></button></div></td>
-                        <td className="p-4 text-sm font-bold">{e._fechaStr}</td>
-                        <td className="p-4 font-medium text-slate-700">{e._desc} <span className="text-[9px] text-emerald-600 bg-emerald-50 ml-2 px-1 py-0.5 rounded border border-emerald-100">Por: {e.recordedBy || 'Admin'}</span></td>
-                        <td className="p-4 text-xs font-bold uppercase text-slate-400">{e._cat}</td>
-                        <td className="p-4 text-center"><span className={`text-[10px] font-bold px-2 py-1 rounded-md ${e._status === 'Adeudo' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{e._status === 'Adeudo' ? 'ADEUDO' : 'PAGADO'}</span></td>
-                        <td className="p-4 text-right font-black text-rose-600">-${Number(e._monto).toLocaleString()}</td>
-                        <td className="p-4 text-xs text-slate-500 font-medium">{e.notes || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
+              <form onSubmit={handleSave} className="bg-white p-4 md:p-6 rounded-2xl border shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4">
+                <input type="text" placeholder="Nombre" required className="p-2.5 border rounded-xl md:col-span-2 outline-none focus:border-emerald-500" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/>
+                <input type="tel" placeholder="Teléfono" className="p-2.5 border rounded-xl outline-none focus:border-emerald-500" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/>
+                <input type="date" required className="p-2.5 border rounded-xl outline-none focus:border-emerald-500" value={form.date} onChange={e=>setForm({...form,date:e.target.value,isWknd:[0,5,6].includes(new Date(e.target.value+'T12:00:00').getDay())})}/>
+                <label className="flex items-center justify-center gap-2 p-2.5 border rounded-xl bg-slate-50 cursor-pointer font-bold"><input type="checkbox" className="w-4 h-4 text-emerald-600" checked={form.depto} onChange={e=>setForm({...form,depto:e.target.checked})}/> + Depto</label>
+                <input type="number" placeholder="Desc %" className="p-2.5 border rounded-xl outline-none focus:border-blue-500" value={form.disc||''} onChange={e=>setForm({...form,disc:e.target.value})}/>
+                <div className="relative"><input type="number" placeholder="Anticipo $" required className="w-full p-2.5 border rounded-xl bg-emerald-50 outline-none focus:border-emerald-500 font-bold" value={form.ant} onChange={e=>setForm({...form,ant:e.target.value})}/><p className="text-[10px] text-slate-500 absolute -bottom-4 font-bold">Total: ${calcTotal}</p></div>
+                <button className="bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl py-2.5 md:col-span-4 mt-2 md:mt-0 transition-colors">Guardar Reserva</button>
+              </form>
+              <div className="bg-white rounded-3xl shadow-sm border overflow-x-auto">
+                <table className="w-full text-sm text-left min-w-[700px]">
+                  <thead className="bg-slate-50 text-xs text-slate-400"><tr><th className="p-4">Fecha</th><th className="p-4">Cliente</th><th className="p-4">Total/Anticipo</th><th className="p-4">Estado</th><th className="p-4 text-right">Acción</th></tr></thead>
+                  <tbody className="divide-y">{bookings.map(b=><tr key={b.id} className="hover:bg-slate-50"><td className="p-4 font-bold">{b._fechaStr}</td><td className="p-4">{b._nombreStr}<br/><span className="text-[10px] text-slate-400">{b._telefonoStr}</span></td><td className="p-4">${b._precioTotal} / <span className="text-emerald-600 font-bold">${b._anticipo}</span><br/><span className="text-[9px] bg-slate-100 px-1 rounded">{b.depto_incluido?'+ Depto':'Solo Salón'}</span></td><td className="p-4"><span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${b._status==='Liquidado'?'bg-emerald-100 text-emerald-700':b._status==='Anticipado'?'bg-blue-100 text-blue-700':'bg-amber-100 text-amber-700'}`}>{b._status}</span></td><td className="p-4 text-right flex flex-col items-end gap-1"><button onClick={()=>setEditB({...b,cliente_nombre:b._nombreStr,cliente_telefono:b._telefonoStr,cliente_correo:b._correoStr,precio_total:b._precioTotal,anticipo:b._anticipo,depto_incluido:b.depto_incluido||false})} className="text-xs bg-slate-100 px-3 py-1 rounded font-bold hover:bg-slate-200">Editar</button>{b._status==='Anticipado'&&<button onClick={()=>liq(b)} className="text-xs bg-emerald-100 text-emerald-700 px-3 py-1 rounded font-bold hover:bg-emerald-200">Liquidar</button>}<button onClick={()=>del(b.id)} className="text-[10px] text-rose-400 underline hover:text-rose-600 mt-1">Liberar</button></td></tr>)}</tbody>
                 </table>
               </div>
-              {/* Modal Edición de Gasto */}
-              {editingExpense && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-0">
-                    <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center"><div><h3 className="font-black text-xl text-slate-800">Editar Gasto</h3></div><button type="button" onClick={() => setEditingExpense(null)} className="w-8 h-8 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"><i className="fa-solid fa-xmark"></i></button></div>
-                    <form onSubmit={handleSaveExpense} className="p-6 space-y-4">
-                      <div className="grid grid-cols-2 gap-4"><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Fecha</label><input type="date" className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.date} onChange={e => setEditingExpense({...editingExpense, date: e.target.value})} required/></div><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Categoría</label><select className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.category} onChange={e => setEditingExpense({...editingExpense, category: e.target.value})} required>{expenseCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div></div>
-                      <div className="grid grid-cols-2 gap-4"><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Monto ($)</label><input type="number" className="w-full p-3 bg-slate-50 border rounded-xl outline-none text-rose-600 font-bold" value={editingExpense.amount} onChange={e => setEditingExpense({...editingExpense, amount: e.target.value})} required/></div><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Estado</label><select className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.status} onChange={e => setEditingExpense({...editingExpense, status: e.target.value})}><option value="Pagado">Pagado</option><option value="Adeudo">Adeudo</option></select></div></div>
-                      <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Descripción</label><input type="text" className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.description} onChange={e => setEditingExpense({...editingExpense, description: e.target.value})} required/></div>
-                      <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Observaciones</label><textarea className="w-full p-3 bg-slate-50 border rounded-xl outline-none resize-none" rows="2" value={editingExpense.notes} onChange={e => setEditingExpense({...editingExpense, notes: e.target.value})}></textarea></div>
-                      <button type="submit" className="w-full bg-slate-900 text-white font-bold py-3.5 rounded-xl mt-4">Actualizar Gasto</button>
-                    </form>
-                  </div>
-                </div>
-              )}
-              {showCatModal && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-6">
-                    <h3 className="font-black text-xl text-slate-800 mb-4">Categorías de Gastos</h3>
-                    <div className="flex gap-2 mb-4"><input type="text" value={newCatName} onChange={e=>setNewCatName(e.target.value)} className="flex-1 p-2 bg-slate-50 border rounded-lg outline-none text-sm" placeholder="Nueva categoría..."/><button type="button" onClick={handleAddCategory} className="bg-emerald-600 text-white px-4 rounded-lg font-bold">+</button></div>
-                    <div className="max-h-60 overflow-y-auto border border-slate-100 rounded-lg">{expenseCategories.map(c => <div key={c.id} className="flex justify-between p-3 border-b hover:bg-slate-50"><span className="text-sm font-bold text-slate-700">{c.name}</span><button type="button" onClick={() => handleDeleteCategory(c.id)} className="text-rose-500"><i className="fa-solid fa-trash"></i></button></div>)}</div>
-                    <button type="button" onClick={() => setShowCatModal(false)} className="w-full mt-4 bg-slate-100 text-slate-700 font-bold py-2.5 rounded-lg">Cerrar</button>
-                  </div>
-                </div>
+              {editB && (
+                <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4 animate-fade-in"><div className="bg-white p-6 rounded-3xl w-full max-w-md"><h3 className="font-bold text-xl mb-4 text-slate-800">Editar {editB._fechaStr}</h3>
+                  <form onSubmit={handleUpdate} className="space-y-4">
+                    <input type="text" className="w-full p-3 border rounded-xl outline-none" value={editB.cliente_nombre} onChange={e=>setEditB({...editB,cliente_nombre:e.target.value})} placeholder="Nombre"/>
+                    <div className="flex gap-2"><input type="tel" className="flex-1 p-3 border rounded-xl outline-none" placeholder="Teléfono" value={editB.cliente_telefono} onChange={e=>setEditB({...editB,cliente_telefono:e.target.value})}/><input type="email" className="flex-1 p-3 border rounded-xl outline-none" placeholder="Correo" value={editB.cliente_correo} onChange={e=>setEditB({...editB,cliente_correo:e.target.value})}/></div>
+                    <div className="flex gap-2"><input type="number" className="flex-1 p-3 border rounded-xl outline-none font-bold" placeholder="Total" value={editB.precio_total} onChange={e=>setEditB({...editB,precio_total:e.target.value})}/><input type="number" className="flex-1 p-3 border rounded-xl bg-emerald-50 outline-none text-emerald-700 font-bold" placeholder="Anticipo" value={editB.anticipo} onChange={e=>setEditB({...editB,anticipo:e.target.value})}/></div>
+                    <label className="flex items-center gap-2 text-sm font-bold text-slate-600"><input type="checkbox" className="w-4 h-4 text-emerald-600" checked={editB.depto_incluido} onChange={e=>{const p=e.target.checked; const a=editB.precio_total; setEditB({...editB,depto_incluido:p, precio_total: p ? Number(a)+2000 : Number(a)-2000});}}/> + Departamento</label>
+                    <div className="flex gap-2 pt-2"><button type="button" onClick={()=>setEditB(null)} className="flex-1 bg-slate-100 py-3 rounded-xl font-bold hover:bg-slate-200">Cancelar</button><button type="submit" className="flex-1 bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800">Guardar Cambios</button></div>
+                  </form>
+                </div></div>
               )}
             </div>
           );
         }
 
-        function MarketingHub({ handleCopyText, showToast, callGeminiAI }) {
+        function ExpensesModule({ db, expenses, cats, prof, showToast, callAI }) {
+          const [f, setF] = useState({ date:new Date().toISOString().split('T')[0], cat:'', amt:'', desc:'', st:'Pagado', n:'' });
+          const [eId, setEId] = useState(null); const [ai, setAi] = useState(''); const [ld, setLd] = useState(false); const [showCat, setShowCat] = useState(false); const [nc, setNc] = useState('');
+          useEffect(()=>{if(!f.cat && cats[0]) setF(prev=>({...prev, cat:cats[0].name}))},[cats]);
+
+          const exCSV = () => { const csv = ['Fecha,Descripción,Categoría,Estado,Monto,Observaciones'].concat(expenses.map(e=>`${e._fechaStr},"${e._desc}",${e._cat},${e._status},${e._monto},"${e.notes||''}"`)).join('\n'); const l=document.createElement('a'); l.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'})); l.download=`CasaCopal_Gastos_${new Date().toISOString().split('T')[0]}.csv`; l.click(); };
+          const save = async(e) => { e.preventDefault(); try{ if(eId){ await updateDoc(doc(db,'gastos',eId), {date:f.date, category:f.cat, amount:Number(f.amt), description:f.desc, status:f.st, notes:f.n}); setEId(null); }else{ await addDoc(collection(db,'gastos'), {date:f.date, category:f.cat, amount:Number(f.amt), description:f.desc, status:f.st, notes:f.n, recordedBy:prof.name}); } showToast('Guardado exitosamente'); setF({date:new Date().toISOString().split('T')[0], cat:cats[0]?.name||'', amt:'', desc:'', st:'Pagado', n:''}); }catch(err){showToast('Error al guardar','error')} };
+          const edit = (e) => { setEId(e.id); setF({date:e._fechaStr||e.date, cat:e._cat||e.category, amt:String(e._monto||e.amount||0), desc:e._desc||e.description, st:e._status||e.status, n:e.notes||''}); window.scrollTo({top:0, behavior:'smooth'}); };
+          const parseAI = async() => { if(!ai) return; setLd(true); try{ const r = await callAI(`Extrae {"monto":numero, "descripcion":"texto", "categoria":"${cats.map(c=>c.name).join(',')}"} de: "${ai}"`, true); if(r.monto) { setF(p=>({...p, amt:r.monto, desc:r.descripcion||p.desc, cat:r.categoria||p.cat})); showToast('Formulario llenado mágicamente'); } }catch(err){showToast('Error IA','error')} setLd(false); };
+          const addCat = async() => { if(!nc)return; await addDoc(collection(db,'categorias_gastos'),{name:nc}); setNc(''); };
+
+          return (
+            <div className="space-y-6 animate-fade-in pb-10 relative">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4"><h2 className="text-3xl font-black">Gastos Operativos</h2><button onClick={exCSV} className="bg-emerald-600 text-white px-4 py-2 rounded-xl font-bold flex gap-2 items-center"><FileSpreadsheet className="w-4 h-4"/> Descargar a Excel</button></div>
+              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-4 md:p-6 rounded-2xl border border-indigo-100 flex flex-col md:flex-row gap-4 items-center"><div className="flex gap-2 items-center"><Sparkles className="w-8 h-8 text-indigo-500 shrink-0 bg-white p-1.5 rounded-full shadow-sm"/><span className="text-sm font-bold text-indigo-900 md:hidden">Registro Mágico</span></div><input type="text" placeholder='Ej. "Compré 3 trapeadores en soriana por 250 pesos"' className="flex-1 w-full p-3 bg-white border border-indigo-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-400" value={ai} onChange={e=>setAi(e.target.value)} onKeyDown={e=>e.key==='Enter'&&parseAI()}/><button onClick={parseAI} disabled={ld} className="w-full md:w-auto bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold shadow-md hover:bg-indigo-700">{ld?'Pensando...':'Autocompletar'}</button></div>
+              <form onSubmit={save} className="bg-white p-4 md:p-6 rounded-2xl border shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                <div><label className="flex justify-between text-xs font-bold text-slate-500 mb-1">Categoría <button type="button" onClick={()=>setShowCat(true)} className="text-emerald-600"><Settings className="w-3 h-3 inline"/> Admin</button></label><select className="w-full p-2.5 border rounded-xl outline-none" required value={f.cat} onChange={e=>setF({...f,cat:e.target.value})}>{cats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">Monto ($)</label><input type="number" placeholder="Monto" className="w-full p-2.5 border rounded-xl font-bold text-rose-600 outline-none" required value={f.amt} onChange={e=>setF({...f,amt:e.target.value})}/></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">Descripción</label><input type="text" placeholder="Ej. Pintura blanca" className="w-full p-2.5 border rounded-xl outline-none" required value={f.desc} onChange={e=>setF({...f,desc:e.target.value})}/></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">Estado</label><select className="w-full p-2.5 border rounded-xl outline-none" value={f.st} onChange={e=>setF({...f,st:e.target.value})}><option>Pagado</option><option>Adeudo</option></select></div>
+                <div className="md:col-span-3"><label className="block text-xs font-bold text-slate-500 mb-1">Observaciones</label><input type="text" placeholder="Factura pendiente..." className="w-full p-2.5 border rounded-xl outline-none" value={f.n} onChange={e=>setF({...f,n:e.target.value})}/></div>
+                <div className="flex gap-2 md:col-span-1">{eId&&<button type="button" onClick={()=>{setEId(null); setF({date:'',cat:cats[0]?.name,amt:'',desc:'',st:'Pagado',n:''});}} className="bg-slate-200 text-slate-600 px-4 py-2.5 rounded-xl font-bold">X</button>}<button className="bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl flex-1 py-2.5">{eId?'Actualizar':'Guardar'}</button></div>
+              </form>
+              <div className="bg-white rounded-3xl shadow-sm border overflow-x-auto"><table className="w-full text-sm text-left min-w-[700px]"><thead className="bg-slate-50 text-xs text-slate-500 uppercase"><tr><th className="p-4 text-center">Acción</th><th className="p-4">Fecha</th><th className="p-4">Descripción</th><th className="p-4 text-center">Estado</th><th className="p-4 text-right">Monto</th></tr></thead>
+              <tbody className="divide-y">{expenses.map(e=><tr key={e.id} className="hover:bg-slate-50"><td className="p-4 text-center"><button onClick={()=>edit(e)} className="bg-slate-100 p-2 rounded-full hover:bg-blue-100 text-slate-600 mr-2"><i className="fa-solid fa-pen text-xs"></i></button><button onClick={()=>{if(window.confirm('¿Borrar?'))deleteDoc(doc(db,'gastos',e.id))}} className="bg-slate-100 p-2 rounded-full hover:bg-rose-100 text-slate-600"><i className="fa-solid fa-trash text-xs"></i></button></td><td className="p-4 font-bold">{e._fechaStr}</td><td className="p-4">{e._desc}<br/><span className="text-[10px] text-slate-400 uppercase">{e._cat} • Por: {e.recordedBy}</span></td><td className="p-4 text-center"><span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${e._status==='Adeudo'?'bg-amber-100 text-amber-700':'bg-emerald-100 text-emerald-700'}`}>{e._status}</span></td><td className="p-4 font-black text-rose-600 text-right">-${e._monto.toLocaleString()}</td></tr>)}</tbody></table></div>
+              {showCat && (
+                <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4"><div className="bg-white p-6 rounded-3xl w-full max-w-sm"><h3 className="font-bold text-xl mb-4">Categorías</h3><div className="flex gap-2 mb-4"><input className="flex-1 border p-2 rounded-lg outline-none" value={nc} onChange={e=>setNc(e.target.value)} placeholder="Nueva..."/><button onClick={addCat} className="bg-emerald-600 text-white px-4 rounded-lg font-bold">+</button></div><div className="max-h-48 overflow-auto border rounded-lg">{cats.map(c=><div key={c.id} className="p-2 border-b flex justify-between"><span>{c.name}</span><button onClick={()=>deleteDoc(doc(db,'categorias_gastos',c.id))} className="text-rose-500 text-xs"><i className="fa-solid fa-trash"></i></button></div>)}</div><button onClick={()=>setShowCat(false)} className="w-full mt-4 bg-slate-100 py-2 rounded-lg font-bold">Cerrar</button></div></div>
+              )}
+            </div>
+          );
+        }
+
+        function QuotesModule({ db, quotes, showToast, onConv }) {
+          const [f, setF] = useState({ name:'', phone:'', email:'', date:'', type:'', guests:'50', depto:false, disc:0 });
+          const save = async(e)=>{ e.preventDefault(); try{ await addDoc(collection(db,'cotizaciones'), {cliente_nombre:f.name, cliente_telefono:f.phone, cliente_correo:f.email, date:f.date, depto_incluido:f.depto, descuento_aplicado:f.disc, timestamp:Date.now()}); showToast('Guardada'); }catch(e){} };
+          return (
+            <div className="space-y-6 pb-10"><h2 className="text-3xl font-black">Cotizaciones CRM</h2>
+              <form onSubmit={save} className="bg-white p-4 md:p-6 border rounded-2xl shadow-sm grid grid-cols-1 md:grid-cols-2 gap-4"><input required placeholder="Nombre del Prospecto" className="p-3 border rounded-xl outline-none" value={f.name} onChange={e=>setF({...f,name:e.target.value})}/><input type="date" required className="p-3 border rounded-xl outline-none" value={f.date} onChange={e=>setF({...f,date:e.target.value})}/><button className="md:col-span-2 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold transition-colors">Guardar Cotización Básica</button></form>
+              <div className="bg-white p-4 border rounded-2xl shadow-sm">{quotes.map(q=><div key={q.id} className="flex flex-col md:flex-row justify-between p-3 border-b border-slate-100 gap-3 items-start md:items-center"><span className="font-bold text-slate-800">{q.cliente_nombre} <span className="font-normal text-slate-500 text-xs ml-2 bg-slate-100 px-2 py-1 rounded">{q.date}</span></span><button onClick={()=>onConv(q)} className="text-xs bg-emerald-100 text-emerald-700 px-4 py-2 rounded-lg font-bold hover:bg-emerald-200"><i className="fa-solid fa-bolt mr-1"></i> A Reserva</button></div>)}</div>
+            </div>
+          );
+        }
+
+        function ClientsModule({ clients, notes, db }) {
+          return (
+            <div className="space-y-6 pb-10"><h2 className="text-3xl font-black">Directorio VIP</h2><div className="grid grid-cols-1 md:grid-cols-3 gap-4">{clients.map(c=><div key={c.id} className="bg-white p-6 border border-slate-200 shadow-sm rounded-2xl"><h3 className="font-black text-lg text-slate-800">{c.name}</h3><a href={`https://wa.me/52${c.phone.replace(/\D/g,'')}`} target="_blank" className="text-sm text-emerald-600 font-bold mb-3 inline-block"><i className="fa-brands fa-whatsapp"></i> {c.phone}</a><div className="bg-slate-50 p-3 rounded-xl text-xs flex justify-between font-bold text-slate-600 border border-slate-100"><span>Eventos: {c.totalBookings}</span><span className="text-emerald-700">Inv: ${c.totalSpent.toLocaleString()}</span></div><p className="mt-3 text-xs italic bg-amber-50 border border-amber-100 p-3 rounded-lg text-slate-600">{notes[c.id]||'Sin notas u observaciones.'}</p></div>)}</div></div>
+          );
+        }
+
+        function MarketingHub({ copy, showToast, callAI }) {
+          const [topic, setTopic] = useState(''); const [post, setPost] = useState(''); const [ld, setLd] = useState(false);
           const [contractData, setContractData] = useState({ client: '', date: '', type: '', startTime: '', endTime: '', salon: '', depto: '', discount: '', deposit: '' });
           const [generatedContract, setGeneratedContract] = useState('');
           const [lockCode, setLockCode] = useState('');
-          const [manualIncludesDepto, setManualIncludesDepto] = useState(false);
           const [generatedManual, setGeneratedManual] = useState('');
+          const [manualIncludesDepto, setManualIncludesDepto] = useState(false);
           const [copiedContract, setCopiedContract] = useState(false);
           const [copiedManual, setCopiedManual] = useState(false);
-          const [aiPostTopic, setAiPostTopic] = useState('');
-          const [generatedPost, setGeneratedPost] = useState('');
-          const [isAiLoading, setIsAiLoading] = useState(false);
-          const [copiedPost, setCopiedPost] = useState(false);
 
-          const handleGeneratePost = async () => {
-              if(!aiPostTopic.trim()) return showToast('Escribe de qué tratará tu post', 'error');
-              setIsAiLoading(true);
-              try {
-                  const prompt = `Escribe un post muy atractivo y persuasivo para Instagram/Facebook sobre este tema: "${aiPostTopic}". Recuerda que somos "Casa Copal", un salón de eventos familiares con alberca, asador y departamento privado en Cabo San Lucas. Usa emojis, un tono amigable, persuasivo y termina SIEMPRE con un llamado a la acción invitando a reservar enviando un WhatsApp al 624 320 3289.`;
-                  const result = await callGeminiAI(prompt);
-                  if(result) setGeneratedPost(result);
-              } catch (err) { showToast('IA: ' + (err.message || 'Error desconocido'), 'error'); } finally { setIsAiLoading(false); }
-          };
-
+          const gen = async()=>{ setLd(true); try{ setPost(await callAI(`Crea un post persuasivo de Facebook para Casa Copal sobre: ${topic}`)); }catch(e){showToast('Error IA','error')} setLd(false); };
+          const dl = async(id, name) => { const el = document.getElementById(id); if(!el||!window.html2canvas) return; const cv = await window.html2canvas(el, {scale:3, useCORS:true}); const a = document.createElement('a'); a.download=name; a.href=cv.toDataURL(); a.click(); };
+          
           const generateContract = () => {
-            const salon = Number(contractData.salon) || 0; const depto = Number(contractData.depto) || 0; const discountPct = Number(contractData.discount) || 0; const deposit = Number(contractData.deposit) || 0;
-            const subtotal = salon + depto; const discountAmount = subtotal * (discountPct / 100); const total = subtotal - discountAmount; const balance = total - deposit;
+            const subtotal = (Number(contractData.salon) || 0) + (Number(contractData.depto) || 0);
+            const total = subtotal - (subtotal * ((Number(contractData.discount) || 0) / 100));
+            const balance = total - (Number(contractData.deposit) || 0);
             const today = new Date(); const todayStr = `${today.getDate()}/${today.getMonth()+1}/${today.getFullYear()}`;
-            let dateFormatted = '[Fecha]'; if (contractData.date) { const parts = contractData.date.split('-'); dateFormatted = `${parts[2]}/${parts[1]}/${parts[0]}`; }
-            let costBreakdown = "";
-            if (salon > 0) costBreakdown += `Costo Salón: $${salon.toLocaleString()} MXN\n`; if (depto > 0) costBreakdown += `Costo Depto: $${depto.toLocaleString()} MXN\n`;
-            if (discountPct > 0) costBreakdown += `Descuento Aplicado (${discountPct}%): -$${discountAmount.toLocaleString()} MXN\n`;
-            if (salon === 0 && depto === 0) costBreakdown += `Costo Renta: $0 MXN\n`;
-
-            const text = `*CONTRATO DE RENTA DE ESPACIO "CASA COPAL"* 🌿\nFECHA: ${todayStr}\n\n*1. LAS PARTES*\nArrendador: Casa Copal Eventos\nCliente: ${contractData.client || '[Nombre]'}\n\n*2. DETALLES DEL EVENTO*\nFecha: ${dateFormatted}\nHorario: De ${contractData.startTime || '[Inicio]'} a ${contractData.endTime || '[Fin]'} hrs.\nTipo: ${contractData.type || '[Tipo de Evento]'} (Ambiente familiar)\nMáximo Invitados: 50 personas.\n\n*3. FINANZAS*\n${costBreakdown.trim()}\n*TOTAL A PAGAR:* $${total.toLocaleString()} MXN\n\nAnticipo Recibido: $${deposit.toLocaleString()} MXN\n*SALDO A LIQUIDAR:* $${balance.toLocaleString()} MXN (Máximo 1 día antes del evento).\n*DEPÓSITO EN GARANTÍA:* $1,500 MXN (Reembolsable 24hrs post-evento).\n\n*4. PENALIZACIONES (CONDICIONES DE GARANTÍA)*\nEl depósito de $1,500 NO será devuelto en los siguientes casos:\nA) Ruido excesivo fuera de horario.\nB) Ingresar botellas/vasos de vidrio en área de alberca.\nC) Daños al mobiliario, uso de pirotecnia o confeti metálico.\nD) Dejar asador encendido, refrigerador sucio o basura fuera de su lugar.\n\n*5. CANCELACIONES*\nCancelaciones con menos de 6 días de anticipación no son reembolsables.\n\n✍️ *FIRMA DIGITAL DE CONFORMIDAD*\nPara confirmar tu reserva, aceptar este contrato y asegurar tu fecha, por favor responde a este mensaje con la frase:\n*"Acepto términos y condiciones"*`;
+            const text = `*CONTRATO CASA COPAL* 🌿\nFECHA: ${todayStr}\n\n*1. PARTES*\nCliente: ${contractData.client || '[Nombre]'}\n\n*2. EVENTO*\nFecha: ${contractData.date || '[Fecha]'}\nHorario: ${contractData.startTime || '[Inicio]'} a ${contractData.endTime || '[Fin]'} hrs.\nTipo: ${contractData.type || '[Tipo]'}\nInvitados: 50 max.\n\n*3. FINANZAS*\n*TOTAL:* $${total.toLocaleString()} MXN\nAnticipo: $${(Number(contractData.deposit)||0).toLocaleString()} MXN\n*SALDO:* $${balance.toLocaleString()} MXN (Liquidar 1 día antes).\n*GARANTÍA:* $1,500 MXN (Reembolsable).\n\n*4. REGLAS*\nNo ruido excesivo, no vidrio en alberca, no confeti metálico, dejar basura en su lugar.\n\nResponde *"Acepto términos y condiciones"* para confirmar.`;
             setGeneratedContract(text);
           };
 
-          const generateManual = () => {
+          useEffect(() => {
             const code = lockCode.trim() || '[CÓDIGO]';
-            const deptoText = manualIncludesDepto ? `\n🏡 ACCESO AL DEPARTAMENTO\nLa clave para entrar al departamento es la misma que para entrar al salón.\n` : '';
-            const text = `🌿 ¡BIENVENIDOS A CASA COPAL! 🌿\nTu evento está listo. Deseamos que pasen un día increíble en familia. Aquí tienes tu guía de acceso:\n\n🔓 1. TU ACCESO DIGITAL (SELF CHECK-IN)\nTu código para entrar hoy es: *${code}*\n(Despierta la cerradura tocando la pantalla, digita el código y presiona #). Ya entrando hay una caja de seguridad con las llaves del salon en caso de ser necesario.\n${deptoText}\n📶 2. RED WI-FI\nRed: MERCUSYS_2FB4\nContraseña: 83763557\n\n📹 3. CHECK-IN VIRTUAL (Inventario)\nPara proteger tu depósito, al llegar envíanos un *video rápido* mostrando el área limpia y completa.\n\n🛑 4. TIPS PARA UN GRAN EVENTO\n• Ruido: Disfruta la música, pero apágala puntualmente a tu hora de salida.\n• Alberca: No usar cristal ni vidrio cerca del agua.\n\n📸 5. CHECK-OUT (Al irse)\nAl final de tu evento, envíanos 2 fotos para procesar tu devolución:\n1. Asador apagado y sin fuego.\n2. Basura en sus botes y refrigerador vacío.\n\nSi tienes alguna duda, escríbenos. ¡Que lo disfruten mucho! 🥳`;
-            setGeneratedManual(text);
-          };
-
-          useEffect(() => { generateManual(); }, [lockCode, manualIncludesDepto]); 
-          
-          const handleDownloadFolleto = async (elementId, filename) => {
-            const element = document.getElementById(elementId);
-            if (!element || !window.html2canvas) return showToast('Error al cargar librería', 'error');
-            try { showToast('Generando imagen...'); const canvas = await window.html2canvas(element, { scale: 3, useCORS: true, backgroundColor: '#ffffff' }); const link = document.createElement('a'); link.download = filename; link.href = canvas.toDataURL('image/png'); link.click(); } catch (err) { showToast('Error al exportar', 'error'); }
-          };
+            const deptoText = manualIncludesDepto ? `\n🏡 ACCESO AL DEPARTAMENTO\nMisma clave del salón.\n` : '';
+            setGeneratedManual(`🌿 ¡BIENVENIDOS A CASA COPAL! 🌿\n\n🔓 1. ACCESO DIGITAL\nCódigo: *${code}*\n(Toca la pantalla y presiona #).${deptoText}\n📶 2. WI-FI\nRed: MERCUSYS_2FB4 | Pass: 83763557\n\n📹 3. CHECK-IN\nEnvíanos un video rápido al llegar mostrando todo en orden.\n\n🛑 4. TIPS\nApaga la música a tu hora. No vidrio en alberca.\n\n📸 5. CHECK-OUT\nEnvíanos 2 fotos al salir: asador apagado y refri vacío.\n\n¡Que lo disfruten! 🥳`);
+          }, [lockCode, manualIncludesDepto]);
 
           return (
-            <div className="animate-fade-in space-y-6 pb-20">
-              <div><h2 className="text-3xl font-black text-slate-800">Hub de Ventas</h2></div>
-              {/* IA Redes Sociales */}
-              <div className="bg-gradient-to-r from-fuchsia-50 to-pink-50 p-6 rounded-3xl shadow-sm border flex flex-col md:flex-row gap-6">
-                  <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center shrink-0"><Sparkles className="text-fuchsia-500 w-8 h-8" /></div>
-                  <div className="flex-1 w-full space-y-3">
-                      <div><h3 className="text-xl font-black text-fuchsia-900">Redactor Mágico para Redes</h3></div>
-                      <div className="flex gap-3"><input type="text" placeholder='Ej. "Post de que nos quedan pocas fechas"' className="flex-1 p-3.5 rounded-xl border outline-none" value={aiPostTopic} onChange={(e) => setAiPostTopic(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleGeneratePost()}/><button onClick={handleGeneratePost} disabled={isAiLoading} className="bg-fuchsia-600 text-white font-bold px-6 rounded-xl">{isAiLoading ? <Loader2 className="w-5 h-5 animate-spin"/> : 'Generar Copy'}</button></div>
-                      {generatedPost && ( <div className="mt-4 bg-white p-4 rounded-xl relative shadow-sm"><button onClick={()=>{handleCopyText(generatedPost); setCopiedPost(true); setTimeout(()=>setCopiedPost(false),2000);}} className="absolute top-3 right-3 text-xs bg-fuchsia-100 text-fuchsia-700 px-3 py-1.5 rounded-lg font-bold">{copiedPost ? '¡Copiado!' : 'Copiar'}</button><p className="text-sm whitespace-pre-wrap pr-20">{generatedPost}</p></div> )}
-                  </div>
+            <div className="space-y-6 pb-20"><h2 className="text-3xl font-black">Hub de Ventas</h2>
+              
+              <div className="bg-gradient-to-r from-fuchsia-50 to-pink-50 p-4 md:p-6 rounded-3xl shadow-sm border border-fuchsia-100 flex flex-col md:flex-row gap-4 items-center">
+                <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shrink-0"><Sparkles className="text-fuchsia-500 w-6 h-6" /></div>
+                <div className="flex-1 w-full"><h3 className="font-bold text-fuchsia-900 mb-2">Redactor Mágico para Redes</h3><div className="flex gap-2"><input className="flex-1 p-3 bg-white rounded-xl border outline-none text-sm" placeholder="Ej. Promoción de mayo..." value={topic} onChange={e=>setTopic(e.target.value)} onKeyDown={e=>e.key==='Enter'&&gen()}/><button onClick={gen} disabled={ld} className="bg-fuchsia-600 text-white font-bold px-4 rounded-xl">{ld?'...':'Generar'}</button></div></div>
               </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-                <div className="bg-white p-6 rounded-3xl shadow-sm border h-fit">
-                  <div className="mb-6"><h3 className="font-black text-slate-800 text-xl">Generador de Contratos</h3></div>
+              {post && <div className="bg-white p-4 rounded-2xl relative shadow-sm border"><button onClick={()=>{copy(post); setCopiedPost(true); setTimeout(()=>setCopiedPost(false),2000);}} className="absolute top-3 right-3 text-xs bg-fuchsia-100 text-fuchsia-700 px-3 py-1.5 rounded-lg font-bold">{copiedPost ? '¡Copiado!' : 'Copiar Texto'}</button><pre className="font-sans text-sm whitespace-pre-wrap mt-2 pr-20">{post}</pre></div>}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white p-6 rounded-3xl border shadow-sm h-fit">
+                  <h3 className="font-black text-slate-800 text-lg mb-4">Generador de Contratos Móvil</h3>
                   <div className="space-y-4">
-                    <input type="text" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" placeholder="Nombre Cliente" value={contractData.client} onChange={e=>setContractData({...contractData, client: e.target.value})}/>
-                    <div className="grid grid-cols-2 gap-4"><input type="date" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.date} onChange={e=>setContractData({...contractData, date: e.target.value})}/><input type="text" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" placeholder="Tipo (Ej. Cumpleaños)" value={contractData.type} onChange={e=>setContractData({...contractData, type: e.target.value})}/></div>
-                    <div className="grid grid-cols-2 gap-4"><input type="time" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.startTime} onChange={e=>setContractData({...contractData, startTime: e.target.value})}/><input type="time" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.endTime} onChange={e=>setContractData({...contractData, endTime: e.target.value})}/></div>
-                    <div className="grid grid-cols-2 gap-4"><input type="number" placeholder="Costo Salón" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.salon} onChange={e=>setContractData({...contractData, salon: e.target.value})}/><input type="number" placeholder="Costo Depto" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.depto} onChange={e=>setContractData({...contractData, depto: e.target.value})}/></div>
-                    <div className="grid grid-cols-2 gap-4"><input type="number" placeholder="Descuento (%)" className="w-full p-2.5 border rounded-lg bg-blue-50 text-blue-700 font-bold text-sm" value={contractData.discount} onChange={e=>setContractData({...contractData, discount: e.target.value})}/><input type="number" placeholder="Anticipo Recibido" className="w-full p-2.5 border rounded-lg bg-emerald-50 text-emerald-700 font-bold text-sm" value={contractData.deposit} onChange={e=>setContractData({...contractData, deposit: e.target.value})}/></div>
-                    <button onClick={generateContract} className="w-full bg-slate-900 text-white font-bold py-3.5 mt-2 rounded-xl hover:bg-slate-800">Generar Contrato</button>
+                    <input type="text" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm outline-none" placeholder="Nombre Cliente" value={contractData.client} onChange={e=>setContractData({...contractData, client: e.target.value})}/>
+                    <div className="grid grid-cols-2 gap-4"><input type="date" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm outline-none" value={contractData.date} onChange={e=>setContractData({...contractData, date: e.target.value})}/><input type="text" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm outline-none" placeholder="Tipo Evento" value={contractData.type} onChange={e=>setContractData({...contractData, type: e.target.value})}/></div>
+                    <div className="grid grid-cols-2 gap-4"><input type="time" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm outline-none" value={contractData.startTime} onChange={e=>setContractData({...contractData, startTime: e.target.value})}/><input type="time" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm outline-none" value={contractData.endTime} onChange={e=>setContractData({...contractData, endTime: e.target.value})}/></div>
+                    <div className="grid grid-cols-2 gap-4"><input type="number" placeholder="Costo Salón" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm outline-none" value={contractData.salon} onChange={e=>setContractData({...contractData, salon: e.target.value})}/><input type="number" placeholder="Costo Depto" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm outline-none" value={contractData.depto} onChange={e=>setContractData({...contractData, depto: e.target.value})}/></div>
+                    <div className="grid grid-cols-2 gap-4"><input type="number" placeholder="Desc %" className="w-full p-2.5 border rounded-lg bg-blue-50 text-blue-700 text-sm font-bold outline-none" value={contractData.discount} onChange={e=>setContractData({...contractData, discount: e.target.value})}/><input type="number" placeholder="Anticipo $" className="w-full p-2.5 border rounded-lg bg-emerald-50 text-emerald-700 text-sm font-bold outline-none" value={contractData.deposit} onChange={e=>setContractData({...contractData, deposit: e.target.value})}/></div>
+                    <button onClick={generateContract} className="w-full bg-slate-900 text-white font-bold py-3 mt-2 rounded-xl">Generar</button>
                   </div>
                 </div>
-                <div className="space-y-6 h-full flex flex-col">
-                  <div className="bg-white p-4 rounded-3xl shadow-sm border overflow-hidden">
-                    <div className="flex justify-between items-center mb-2"><label className="font-bold">Contrato WhatsApp</label><button onClick={()=>{handleCopyText(generatedContract); setCopiedContract(true); setTimeout(()=>setCopiedContract(false),2000);}} className="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg">{copiedContract?'Copiado':'Copiar'}</button></div>
-                    <textarea readOnly value={generatedContract} className="w-full min-h-[300px] p-4 bg-slate-50 text-sm resize-none outline-none"></textarea>
+
+                <div className="space-y-6">
+                  <div className="bg-white p-2 rounded-3xl border shadow-sm overflow-hidden">
+                    <div className="flex justify-between items-center p-2 px-4"><label className="font-bold text-sm">Contrato</label><button onClick={()=>{copy(generatedContract); setCopiedContract(true); setTimeout(()=>setCopiedContract(false),2000);}} className="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg">{copiedContract?'Copiado':'Copiar'}</button></div>
+                    <textarea readOnly value={generatedContract} className="w-full h-[200px] p-4 bg-slate-50 text-[12px] font-mono resize-none outline-none rounded-b-2xl"></textarea>
                   </div>
-                  <div className="bg-white p-6 rounded-3xl shadow-sm border border-l-4 border-l-emerald-500">
-                    <h3 className="font-bold text-emerald-800 mb-2 uppercase text-sm">Manual de Bienvenida</h3>
-                    <div className="bg-slate-50 p-4 rounded-xl mb-4 flex gap-2"><input type="text" className="flex-1 p-2 border rounded-lg" placeholder="Código Puerta (Ej. 1234)" value={lockCode} onChange={e=>setLockCode(e.target.value)} /><label className="flex items-center gap-1 font-bold text-sm text-slate-600"><input type="checkbox" className="w-4 h-4" checked={manualIncludesDepto} onChange={e=>setManualIncludesDepto(e.target.checked)}/> + Depto</label></div>
-                    <div className="flex justify-between items-center mb-2"><label className="text-[10px] font-bold uppercase text-slate-500">Vista Previa</label><button onClick={()=>{handleCopyText(generatedManual); setCopiedManual(true); setTimeout(()=>setCopiedManual(false),2000);}} className="text-xs font-bold bg-emerald-100 text-emerald-800 px-3 py-1.5 rounded-lg">{copiedManual?'Copiado':'Copiar'}</button></div>
-                    <textarea readOnly value={generatedManual} className="w-full min-h-[220px] p-4 bg-slate-50 text-sm resize-none outline-none"></textarea>
+                  <div className="bg-white p-6 rounded-3xl border shadow-sm border-l-4 border-l-emerald-500">
+                    <h3 className="font-bold text-emerald-800 mb-2 uppercase text-xs">Manual Bienvenida</h3>
+                    <div className="flex gap-2 mb-3"><input type="text" className="flex-1 p-2 border rounded-lg bg-slate-50 text-sm outline-none" placeholder="Código (Ej. 1234)" value={lockCode} onChange={e=>setLockCode(e.target.value)} /><label className="flex items-center gap-1 font-bold text-xs"><input type="checkbox" className="w-4 h-4" checked={manualIncludesDepto} onChange={e=>setManualIncludesDepto(e.target.checked)}/> + Depto</label></div>
+                    <div className="flex justify-between items-center mb-1"><label className="text-[10px] font-bold uppercase text-slate-400">Vista Previa</label><button onClick={()=>{copy(generatedManual); setCopiedManual(true); setTimeout(()=>setCopiedManual(false),2000);}} className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-3 py-1 rounded-md">{copiedManual?'Copiado':'Copiar'}</button></div>
+                    <textarea readOnly value={generatedManual} className="w-full h-[150px] p-3 bg-slate-50 text-[11px] font-mono resize-none outline-none rounded-xl"></textarea>
                   </div>
                 </div>
               </div>
 
-              {/* Generador de Folletos Originales */}
               <div className="mt-8 border-t border-slate-200 pt-8">
-                <h3 className="font-black text-xl mb-6">Folletos Digitales</h3>
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-                    <div className="flex flex-col items-center bg-white p-6 rounded-3xl border shadow-sm">
-                       <div id="folleto-salon" className="bg-white w-[380px] shadow-xl overflow-hidden relative" style={{ fontFamily: "'Montserrat', sans-serif" }}>
-                          <div className="h-[250px] w-full bg-slate-50 relative">
-                              <img src={"https://" + "i.postimg.cc/Xq68hKSx/foto_1.png"} crossOrigin="anonymous" className="w-full h-[190px] object-cover rounded-b-[40px] shadow-sm" />
-                              <img src={"https://" + "i.postimg.cc/x1c38XjB/foto_6.jpg"} crossOrigin="anonymous" className="absolute -bottom-6 left-6 w-32 h-32 object-cover rounded-2xl shadow-xl border-4 border-white transform -rotate-3" />
-                              <img src={"https://" + "i.postimg.cc/VkdWvJL1/foto_4.png"} crossOrigin="anonymous" className="absolute -bottom-2 right-6 w-24 h-24 object-cover rounded-full shadow-xl border-4 border-white" />
-                          </div>
-                          <div className="px-8 pt-6 pb-6 text-center">
-                              <h1 className="text-4xl font-black text-slate-900 tracking-tight">CASA COPAL</h1>
-                              <p className="text-emerald-600 text-[10px] font-bold tracking-[0.25em] uppercase mb-4">Tu evento familiar perfecto</p>
-                              <div className="bg-slate-50 rounded-2xl p-3 mb-4 border text-left"><div className="flex justify-between items-center"><p className="text-[11px] font-bold uppercase text-slate-500">Lunes a Jueves</p><p className="text-lg font-black">$4,000</p></div><div className="my-1 border-t"></div><div className="flex justify-between items-center"><p className="text-[11px] font-bold uppercase text-emerald-600">Viernes a Dom</p><p className="text-lg font-black">$5,000</p></div></div>
-                              <ul className="text-left text-[12px] text-slate-700 space-y-2 mb-6"><li>✔️ Paquete de 7 horas.</li><li>✔️ Mobiliario para 50 invitados.</li><li>✔️ Área techada excelente sombra.</li><li>✔️ Cocina asador, estufa, hielera.</li><li>✔️ Dos baños.</li><li>🔊 Bocina Bluetooth incluida.</li></ul>
-                              <div className="bg-slate-900 text-white text-[10px] font-bold px-6 py-2 rounded-full inline-block uppercase">¡Aparta tu fecha con el 50%!</div>
-                              <p className="text-[11px] font-black mt-2">📲 Reservas: 624 320 3289</p>
-                              <p className="text-slate-400 text-[10px] mt-1">{"www." + "casacopal.com.mx"}</p>
-                          </div>
-                       </div>
-                       <button onClick={() => handleDownloadFolleto('folleto-salon', 'CasaCopal_Salon.png')} className="bg-emerald-600 text-white font-bold py-2.5 px-6 rounded-xl mt-4">Descargar Folleto Salón</button>
+                <h3 className="font-black text-xl mb-6">Folletos Digitales Originales</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="bg-white p-6 rounded-3xl border shadow-sm text-center">
+                    <div id="f-salon" className="bg-white w-[300px] sm:w-[380px] mx-auto shadow-xl rounded-2xl overflow-hidden pb-4" style={{fontFamily:"'Montserrat',sans-serif"}}>
+                       <img src={"https://" + "i.postimg.cc/Xq68hKSx/foto_1.png"} crossOrigin="anonymous" className="w-full h-[150px] sm:h-[190px] object-cover" />
+                       <h1 className="text-3xl sm:text-4xl font-black mt-4">CASA COPAL</h1><p className="text-emerald-600 text-[9px] sm:text-[10px] font-bold tracking-widest uppercase">Tu evento perfecto</p>
+                       <div className="px-6 text-xs sm:text-sm mt-4 text-left font-medium space-y-1"><p>✔️ Paquete de 7 horas.</p><p>✔️ Mobiliario para 50.</p><p>✔️ Excelente sombra.</p><p>✔️ Cocina asador, estufa, hielera.</p></div><p className="text-[9px] sm:text-[10px] mt-4 font-bold">624 320 3289 | {"www."+"casacopal.com.mx"}</p>
                     </div>
-
-                    <div className="flex flex-col items-center bg-white p-6 rounded-3xl border shadow-sm">
-                       <div id="folleto-depto" className="bg-white w-[380px] shadow-xl overflow-hidden relative" style={{ fontFamily: "'Montserrat', sans-serif" }}>
-                          <div className="px-8 pt-8 pb-2">
-                              <span className="bg-slate-100 text-[9px] font-bold px-3 py-1 rounded-full uppercase border">Extiende tu experiencia</span>
-                              <h1 className="text-3xl font-black mt-2 leading-tight">DEPARTAMENTO<br/><span className="text-emerald-600">PRIVADO</span></h1>
-                          </div>
-                          <div className="relative h-[220px] w-full mt-1">
-                              <img src={"https://" + "i.postimg.cc/K4XQyFBj/20260201-232054000-i-OS.jpg"} crossOrigin="anonymous" className="absolute top-0 left-8 right-8 h-[160px] object-cover rounded-2xl shadow-sm" />
-                              <img src={"https://" + "i.postimg.cc/WtRSPjgb/cocina.jpg"} crossOrigin="anonymous" className="absolute top-[90px] left-5 w-[180px] h-[120px] object-cover rounded-2xl shadow-2xl border-4 border-white transform -rotate-3" />
-                              <div className="absolute top-[110px] right-6 w-[95px] h-[95px] rounded-full overflow-hidden shadow-xl border-4 border-white"><img src={"https://" + "i.postimg.cc/cL22hvVG/bano-2.jpg"} crossOrigin="anonymous" className="w-full h-full object-cover -rotate-90 scale-[1.35]" /></div>
-                          </div>
-                          <div className="px-8 flex flex-col pb-6 pt-2">
-                              <p className="text-[12px] text-slate-600 mb-4">¿No quieres manejar de noche? Disfruta de un espacio exclusivo para descansar al terminar tu evento.</p>
-                              <div className="grid grid-cols-2 gap-2 mb-4 text-[11px] font-semibold"><div className="bg-slate-50 p-2 rounded-lg border text-center">🛏️ Cama Queen</div><div className="bg-slate-50 p-2 rounded-lg border text-center">🛋️ Sala de estar</div><div className="bg-slate-50 p-2 rounded-lg border text-center">🍳 Cocina</div><div className="bg-slate-50 p-2 rounded-lg border text-center">🚪 Acceso privado</div></div>
-                              <div className="flex gap-2"><div className="flex-1 border p-2 text-center rounded-xl bg-white"><p className="text-[8px] text-slate-400 font-bold uppercase">Lun a Jue</p><p className="text-lg font-black">+$1,600</p></div><div className="flex-1 border p-2 text-center rounded-xl bg-emerald-50 border-emerald-100"><p className="text-[8px] text-emerald-600 font-bold uppercase">Vie a Dom</p><p className="text-lg font-black text-emerald-700">+$2,000</p></div></div>
-                              <p className="text-[11px] font-black mt-4 text-center">📲 Reservas: 624 320 3289</p>
-                              <p className="text-slate-400 text-[10px] mt-1 text-center">{"www." + "casacopal.com.mx"}</p>
-                          </div>
-                       </div>
-                       <button onClick={() => handleDownloadFolleto('folleto-depto', 'CasaCopal_Depto.png')} className="bg-blue-600 text-white font-bold py-2.5 px-6 rounded-xl mt-4">Descargar Folleto Depto</button>
+                    <button onClick={()=>dl('f-salon','Salon.png')} className="mt-4 bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold w-full sm:w-auto shadow-md hover:bg-emerald-700">Descargar Salón</button>
+                  </div>
+                  <div className="bg-white p-6 rounded-3xl border shadow-sm text-center">
+                    <div id="f-depto" className="bg-white w-[300px] sm:w-[380px] mx-auto shadow-xl rounded-2xl overflow-hidden pt-8 pb-4" style={{fontFamily:"'Montserrat',sans-serif"}}>
+                       <h1 className="text-2xl sm:text-3xl font-black">DEPARTAMENTO<br/><span className="text-emerald-600">PRIVADO</span></h1>
+                       <img src={"https://" + "i.postimg.cc/K4XQyFBj/20260201-232054000-i-OS.jpg"} crossOrigin="anonymous" className="w-[80%] mx-auto h-[120px] sm:h-[160px] object-cover rounded-2xl mt-4 shadow-sm" />
+                       <div className="px-6 text-[10px] sm:text-xs mt-6 font-bold text-slate-600 flex justify-between bg-slate-50 p-3 mx-4 rounded-xl border"><p>Lun a Jueves<br/><span className="text-sm font-black text-slate-800">+$1,600</span></p><p className="text-emerald-700">Viernes a Dom<br/><span className="text-sm font-black">+$2,000</span></p></div><p className="text-[9px] sm:text-[10px] mt-4 font-bold">624 320 3289 | {"www."+"casacopal.com.mx"}</p>
                     </div>
+                    <button onClick={()=>dl('f-depto','Depto.png')} className="mt-4 bg-blue-600 text-white px-6 py-2.5 rounded-xl font-bold w-full sm:w-auto shadow-md hover:bg-blue-700">Descargar Depto</button>
+                  </div>
                 </div>
               </div>
+
             </div>
           );
         }
