@@ -1131,6 +1131,59 @@
             }));
           };
 
+          const handleSendEmail = (booking) => {
+            const correo = booking._correoStr;
+            if (!correo) {
+              showToast('Este cliente no tiene correo registrado', 'error');
+              return;
+            }
+
+            const nombre = booking._nombreStr;
+            const precio = booking._precioTotal;
+            const anticipo = booking._anticipo || 0;
+            const saldo = precio - anticipo;
+            const incluyeDepto = booking.depto_incluido;
+            
+            let fechaBonita = booking._fechaStr;
+            if (booking._fechaStr && booking._fechaStr.includes('-')) {
+                const partes = booking._fechaStr.split('-');
+                const fecha = new Date(partes[0], partes[1] - 1, partes[2]);
+                const opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+                let texto = fecha.toLocaleDateString('es-MX', opciones);
+                fechaBonita = texto.charAt(0).toUpperCase() + texto.slice(1);
+            }
+
+            const asunto = encodeURIComponent(`Confirmación de Reserva - Casa Copal 🌿`);
+            
+            let cuerpo = `¡Hola ${nombre}!\n\n`;
+            cuerpo += `Este correo es para confirmar formalmente que hemos recibido tu anticipo y tu reserva en Casa Copal está 100% segura.\n\n`;
+            cuerpo += `🗓️ Fecha de tu evento: ${fechaBonita}\n`;
+            
+            if (precio !== undefined && precio !== null) {
+                cuerpo += `💵 Total Acordado: $${Number(precio).toLocaleString()} MXN\n`;
+                cuerpo += `✅ Anticipo Recibido: $${Number(anticipo).toLocaleString()} MXN\n`;
+                
+                if (saldo > 0) {
+                    cuerpo += `⏳ Faltante por Cubrir: $${Number(saldo).toLocaleString()} MXN\n`;
+                } else {
+                    cuerpo += `✨ Faltante por Cubrir: $0 MXN (Evento Liquidado)\n`;
+                }
+            }
+            
+            if (incluyeDepto === true) {
+                cuerpo += `🛏️ Espacios: Salón Principal + Departamento Privado\n`;
+            } else {
+                cuerpo += `🏠 Espacios: Únicamente Salón Principal\n`;
+            }
+            
+            cuerpo += `\nNos da mucho gusto recibirte. Recuerda que el saldo pendiente se liquida máximo 1 día antes del evento.\n\n`;
+            cuerpo += `Si tienes alguna duda adicional, seguimos en contacto por WhatsApp.\n\n`;
+            cuerpo += `Atentamente,\nEquipo Casa Copal\ninfo@casacopal.com.mx`;
+
+            const enlaceCorreo = `mailto:${correo}?subject=${asunto}&body=${encodeURIComponent(cuerpo)}`;
+            window.open(enlaceCorreo, '_blank');
+          };
+
           return (
             <div className="animate-fade-in space-y-6">
               <div className="flex justify-between items-end">
@@ -1251,6 +1304,11 @@
                               )}
                               {b._correoStr && (
                                 <span className="inline-flex items-center gap-1.5 text-[10px] text-slate-500 font-medium"><i className="fa-regular fa-envelope text-slate-400"></i> {b._correoStr}</span>
+                              )}
+                              {b._correoStr && (
+                                <button onClick={() => handleSendEmail(b)} className="mt-1 inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-sm transition-colors w-fit" title="Enviar Confirmación por Correo">
+                                  <i className="fa-solid fa-paper-plane text-blue-500"></i> Enviar Recibo
+                                </button>
                               )}
                             </div>
                           </td>
