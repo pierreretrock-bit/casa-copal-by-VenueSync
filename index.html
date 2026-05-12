@@ -257,7 +257,17 @@
                   uniqueClients[cleanPhone].totalSpent += res._precioTotal;
                 }
               });
-              setClients(Object.values(uniqueClients));
+              
+              const clientsArray = Object.values(uniqueClients)
+                .filter(c => c.totalSpent > 0) // Excluir cortesías puras (0 pesos gastados)
+                .sort((a, b) => {
+                  if (b.totalSpent !== a.totalSpent) {
+                    return b.totalSpent - a.totalSpent; // Ordenar por dinero invertido de mayor a menor
+                  }
+                  return b.totalBookings - a.totalBookings; // Desempate: Ordenar por cantidad de reservas
+                });
+                
+              setClients(clientsArray);
             }, handleDbError);
 
             const unsubExpenses = onSnapshot(expensesRef, (snapshot) => {
@@ -707,7 +717,7 @@
                           <i className="fa-solid fa-pen"></i> Editar
                         </button>
                       </div>
-                      <p className="text-xs text-slate-600 italic bg-amber-50 p-3 rounded-lg border border-amber-100 min-h-[40px]">
+                      <p className="text-xs font-bold text-slate-800 bg-amber-100 p-3 rounded-lg border border-amber-300 min-h-[40px] shadow-sm">
                         {clientNotes[c.id] || 'Sin observaciones registradas...'}
                       </p>
                     </div>
@@ -1492,7 +1502,15 @@
                         <td className="p-4 text-xs font-bold uppercase text-slate-400">{e._cat}</td>
                         <td className="p-4 text-center"><span className={`text-[10px] font-bold px-2 py-1 rounded-md ${e._status === 'Adeudo' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{e._status === 'Adeudo' ? 'ADEUDO' : 'PAGADO'}</span></td>
                         <td className="p-4 text-right font-black text-rose-600">-${Number(e._monto).toLocaleString()}</td>
-                        <td className="p-4 text-xs text-slate-500 font-medium">{e.notes || '-'}</td>
+                        <td className="p-4">
+                          {e.notes ? (
+                            <div className="text-[11px] font-bold text-slate-800 bg-amber-100 border border-amber-300 px-2.5 py-1.5 rounded-lg inline-block whitespace-pre-wrap max-w-[200px] shadow-sm">
+                              {e.notes}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400 font-medium">-</span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
