@@ -1559,49 +1559,120 @@
                 </div>
               </div>
 
-              {/* Generador de Folletos Originales */}
+              {/* Generador de Folletos Originales Actualizados */}
               <div className="mt-8 border-t border-slate-200 pt-8">
                 <h3 className="font-black text-xl mb-6">Folletos Digitales</h3>
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                    
+                    {/* Folleto Salón Reemplazado */}
                     <div className="flex flex-col items-center bg-white p-6 rounded-3xl border shadow-sm">
-                       <div id="folleto-salon" className="bg-white w-[380px] shadow-xl overflow-hidden relative" style={{ fontFamily: "'Montserrat', sans-serif" }}>
-                          <div className="h-[250px] w-full bg-slate-50 relative">
-                              <img src={"https://" + "i.postimg.cc/Xq68hKSx/foto_1.png"} crossOrigin="anonymous" className="w-full h-[190px] object-cover rounded-b-[40px] shadow-sm" />
-                              <img src={"https://" + "i.postimg.cc/x1c38XjB/foto_6.jpg"} crossOrigin="anonymous" className="absolute -bottom-6 left-6 w-32 h-32 object-cover rounded-2xl shadow-xl border-4 border-white transform -rotate-3" />
-                              <img src={"https://" + "i.postimg.cc/VkdWvJL1/foto_4.png"} crossOrigin="anonymous" className="absolute -bottom-2 right-6 w-24 h-24 object-cover rounded-full shadow-xl border-4 border-white" />
-                          </div>
-                          <div className="px-8 pt-6 pb-6 text-center">
-                              <h1 className="text-4xl font-black text-slate-900 tracking-tight">CASA COPAL</h1>
-                              <p className="text-emerald-600 text-[10px] font-bold tracking-[0.25em] uppercase mb-4">Tu evento familiar perfecto</p>
-                              <div className="bg-slate-50 rounded-2xl p-3 mb-4 border text-left"><div className="flex justify-between items-center"><p className="text-[11px] font-bold uppercase text-slate-500">Lunes a Jueves</p><p className="text-lg font-black">$4,000</p></div><div className="my-1 border-t"></div><div className="flex justify-between items-center"><p className="text-[11px] font-bold uppercase text-emerald-600">Viernes a Dom</p><p className="text-lg font-black">$5,000</p></div></div>
-                              <ul className="text-left text-[12px] text-slate-700 space-y-2 mb-6"><li>✔️ Paquete de 7 horas.</li><li>✔️ Mobiliario para 50 invitados.</li><li>✔️ Área techada excelente sombra.</li><li>✔️ Cocina asador, estufa, hielera.</li><li>✔️ Dos baños.</li><li>🔊 Bocina Bluetooth incluida.</li></ul>
-                              <div className="bg-slate-900 text-white text-[10px] font-bold px-6 py-2 rounded-full inline-block uppercase">¡Aparta tu fecha con el 50%!</div>
-                              <p className="text-[11px] font-black mt-2">📲 Reservas: 624 320 3289</p>
-                              <p className="text-slate-400 text-[10px] mt-1">{"www." + "casacopal.com.mx"}</p>
-                          </div>
-                       </div>
+                       <div id="folleto-salon" className="bg-white w-[400px] h-[700px] relative overflow-hidden rounded-2xl flex flex-col shadow-xl" style={{ fontFamily: "'Montserrat', sans-serif" }}>
+                            <div className="h-[250px] w-full relative bg-slate-50">
+                                <img src="https://i.postimg.cc/Xq68hKSx/foto_1.png" crossOrigin="anonymous" className="w-full h-[190px] object-cover rounded-b-[40px] shadow-sm" />
+                                <div className="absolute -bottom-6 left-6 w-32 h-32 bg-white rounded-2xl p-1 shadow-xl z-20 transform -rotate-3">
+                                    <img src="https://i.postimg.cc/x1c38XjB/foto_6.jpg" crossOrigin="anonymous" className="w-full h-full object-cover rounded-xl" />
+                                </div>
+                                <div className="absolute -bottom-2 right-6 w-24 h-24 bg-white rounded-full p-1 shadow-lg z-10">
+                                    <img src="https://i.postimg.cc/VkdWvJL1/foto_4.png" crossOrigin="anonymous" className="w-full h-full object-cover rounded-full" />
+                                </div>
+                            </div>
+                            <div className="px-8 pt-6 pb-4 flex-1 flex flex-col bg-white">
+                                <div className="text-center mb-4">
+                                    <h1 className="text-4xl font-black text-slate-900 tracking-tight mb-0.5">CASA COPAL</h1>
+                                    <p className="text-emerald-600 text-[10px] font-bold tracking-[0.25em] uppercase">Tu evento familiar perfecto</p>
+                                </div>
+                                <div className="bg-slate-50 rounded-2xl p-3.5 mb-4 border border-slate-100 shadow-inner flex flex-col gap-1.5">
+                                    <div className="flex justify-between items-center px-2">
+                                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Lunes a Jueves</p>
+                                        <p className="text-lg font-black text-slate-800">$4,000</p>
+                                    </div>
+                                    <div className="w-full h-px bg-slate-200"></div>
+                                    <div className="flex justify-between items-center px-2">
+                                        <p className="text-[11px] font-bold text-emerald-600 uppercase tracking-wider">Viernes a Domingo</p>
+                                        <p className="text-lg font-black text-slate-800">$5,000</p>
+                                    </div>
+                                </div>
+                                <ul className="space-y-2 text-[12px] text-slate-700 font-medium flex-1 px-1">
+                                    <li className="flex items-start gap-3"><span className="text-emerald-500 text-[14px] mt-[-1px]">✔️</span> <span><strong>Paquete de 7 horas</strong> de servicio.</span></li>
+                                    <li className="flex items-start gap-3"><span className="text-emerald-500 text-[14px] mt-[-1px]">✔️</span> <span><strong>Mobiliario listo</strong> para 50 invitados.</span></li>
+                                    <li className="flex items-start gap-3"><span className="text-emerald-500 text-[14px] mt-[-1px]">✔️</span> <span>Área techada fresca con <strong>excelente sombra</strong>.</span></li>
+                                    <li className="flex items-start gap-3"><span className="text-emerald-500 text-[14px] mt-[-1px]">✔️</span> <span>Cocina con asador, <strong>estufa y hielera grande</strong>.</span></li>
+                                    <li className="flex items-start gap-3"><span className="text-emerald-500 text-[14px] mt-[-1px]">✔️</span> <span><strong>Dos baños</strong> (exterior e interior con regadera).</span></li>
+                                    <li className="flex items-start gap-3 bg-emerald-50 p-2 rounded-lg border border-emerald-100"><span className="text-emerald-600 text-[14px] mt-[-1px]">🔊</span> <span className="text-emerald-900"><strong>Bocina Bluetooth</strong> incluida.</span></li>
+                                    <li className="flex items-start gap-3 mt-1"><span className="text-red-500 text-[14px] mt-[-1px]">📍</span> <span><strong>Ubicación:</strong> Col. Mezquites.</span></li>
+                                </ul>
+                                
+                                <div className="mt-auto text-center pt-2 flex flex-col gap-1 items-center">
+                                    <div className="inline-block bg-slate-900 text-white text-[10px] font-bold px-6 py-2 rounded-full uppercase tracking-widest shadow-md">
+                                        ¡Aparta tu fecha con el 50%!
+                                    </div>
+                                    <div className="text-slate-700 text-[11px] font-black bg-slate-100 px-4 py-1 rounded-full border border-slate-200">
+                                        📲 Reservas: 624 320 3289
+                                    </div>
+                                    <div className="text-slate-400 text-[10px] font-bold tracking-wider mt-0.5">
+                                        <i className="fa-solid fa-globe text-emerald-500"></i> www.casacopal.com.mx
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                        <button onClick={() => handleDownloadFolleto('folleto-salon', 'CasaCopal_Salon.png')} className="bg-emerald-600 text-white font-bold py-2.5 px-6 rounded-xl mt-4">Descargar Folleto Salón</button>
                     </div>
 
+                    {/* Folleto Depto Reemplazado */}
                     <div className="flex flex-col items-center bg-white p-6 rounded-3xl border shadow-sm">
-                       <div id="folleto-depto" className="bg-white w-[380px] shadow-xl overflow-hidden relative" style={{ fontFamily: "'Montserrat', sans-serif" }}>
-                          <div className="px-8 pt-8 pb-2">
-                              <span className="bg-slate-100 text-[9px] font-bold px-3 py-1 rounded-full uppercase border">Extiende tu experiencia</span>
-                              <h1 className="text-3xl font-black mt-2 leading-tight">DEPARTAMENTO<br/><span className="text-emerald-600">PRIVADO</span></h1>
-                          </div>
-                          <div className="relative h-[220px] w-full mt-1">
-                              <img src={"https://" + "i.postimg.cc/K4XQyFBj/20260201-232054000-i-OS.jpg"} crossOrigin="anonymous" className="absolute top-0 left-8 right-8 h-[160px] object-cover rounded-2xl shadow-sm" />
-                              <img src={"https://" + "i.postimg.cc/WtRSPjgb/cocina.jpg"} crossOrigin="anonymous" className="absolute top-[90px] left-5 w-[180px] h-[120px] object-cover rounded-2xl shadow-2xl border-4 border-white transform -rotate-3" />
-                              <div className="absolute top-[110px] right-6 w-[95px] h-[95px] rounded-full overflow-hidden shadow-xl border-4 border-white"><img src={"https://" + "i.postimg.cc/cL22hvVG/bano-2.jpg"} crossOrigin="anonymous" className="w-full h-full object-cover -rotate-90 scale-[1.35]" /></div>
-                          </div>
-                          <div className="px-8 flex flex-col pb-6 pt-2">
-                              <p className="text-[12px] text-slate-600 mb-4">¿No quieres manejar de noche? Disfruta de un espacio exclusivo para descansar al terminar tu evento.</p>
-                              <div className="grid grid-cols-2 gap-2 mb-4 text-[11px] font-semibold"><div className="bg-slate-50 p-2 rounded-lg border text-center">🛏️ Cama Queen</div><div className="bg-slate-50 p-2 rounded-lg border text-center">🛋️ Sala de estar</div><div className="bg-slate-50 p-2 rounded-lg border text-center">🍳 Cocina</div><div className="bg-slate-50 p-2 rounded-lg border text-center">🚪 Acceso privado</div></div>
-                              <div className="flex gap-2"><div className="flex-1 border p-2 text-center rounded-xl bg-white"><p className="text-[8px] text-slate-400 font-bold uppercase">Lun a Jue</p><p className="text-lg font-black">+$1,600</p></div><div className="flex-1 border p-2 text-center rounded-xl bg-emerald-50 border-emerald-100"><p className="text-[8px] text-emerald-600 font-bold uppercase">Vie a Dom</p><p className="text-lg font-black text-emerald-700">+$2,000</p></div></div>
-                              <p className="text-[11px] font-black mt-4 text-center">📲 Reservas: 624 320 3289</p>
-                              <p className="text-slate-400 text-[10px] mt-1 text-center">{"www." + "casacopal.com.mx"}</p>
-                          </div>
-                       </div>
+                       <div id="folleto-depto" className="bg-white w-[400px] h-[700px] relative overflow-hidden rounded-2xl flex flex-col shadow-xl" style={{ fontFamily: "'Montserrat', sans-serif" }}>
+                            <div className="px-8 pt-8 pb-2 shrink-0">
+                                <span className="inline-block bg-slate-100 text-slate-500 text-[9px] font-bold px-3 py-1 rounded-full uppercase tracking-widest mb-2 border border-slate-200">Extiende tu experiencia</span>
+                                <h1 className="text-3xl font-black text-slate-900 leading-tight">DEPARTAMENTO<br /><span className="text-emerald-600">PRIVADO</span></h1>
+                            </div>
+                            
+                            <div className="relative h-[220px] w-full shrink-0 mt-1">
+                                <div className="absolute top-0 left-8 right-8 h-[160px] rounded-2xl shadow-sm overflow-hidden">
+                                    <img src="https://i.postimg.cc/K4XQyFBj/20260201_232054000_i_OS.jpg" crossOrigin="anonymous" className="w-full h-full object-cover" alt="Recámara" />
+                                </div>
+                                <div className="absolute top-[90px] left-5 w-[180px] h-[120px] bg-white rounded-2xl p-1.5 shadow-2xl z-10 transform -rotate-3">
+                                    <img src="https://i.postimg.cc/WtRSPjgb/cocina.jpg" crossOrigin="anonymous" className="w-full h-full object-cover rounded-xl" alt="Cocina Sala" />
+                                </div>
+                                <div className="absolute top-[110px] right-6 w-[95px] h-[95px] bg-white rounded-full p-1 shadow-xl z-20">
+                                    <div className="w-full h-full rounded-full overflow-hidden">
+                                        <img src="https://i.postimg.cc/cL22hvVG/bano-2.jpg" crossOrigin="anonymous" className="w-full h-full object-cover -rotate-90 scale-[1.35]" alt="Baño" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="px-8 flex-1 flex flex-col pb-4 pt-2">
+                                <p className="text-[12px] text-slate-600 mb-4 font-medium leading-snug">
+                                    ¿No quieres manejar de noche? Disfruta de un espacio exclusivo y equipado para descansar al terminar tu evento.
+                                </p>
+                                <div className="grid grid-cols-2 gap-2 mb-4 text-[11px] text-slate-700 font-semibold">
+                                    <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-100"><span className="text-emerald-500 text-base">🛏️</span> Cama Queen Size</div>
+                                    <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-100"><span className="text-emerald-500 text-base">🛋️</span> Sala de estar</div>
+                                    <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-100"><span className="text-emerald-500 text-base">🍳</span> Cocina equipada</div>
+                                    <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-100"><span className="text-emerald-500 text-base">🚪</span> Acceso privado</div>
+                                </div>
+                                <div className="flex gap-2 mt-auto shrink-0">
+                                    <div className="flex-1 border border-slate-200 rounded-xl p-2 text-center bg-white shadow-sm flex flex-col justify-center">
+                                        <p className="text-[8px] text-slate-400 uppercase tracking-wider font-bold mb-0.5">Lunes a Jueves</p>
+                                        <p className="text-lg font-black text-slate-800 leading-none">+$1,600</p>
+                                        <p className="text-[7px] font-bold text-slate-400 uppercase mt-1">por noche</p>
+                                    </div>
+                                    <div className="flex-1 bg-emerald-50 border border-emerald-100 rounded-xl p-2 text-center shadow-sm flex flex-col justify-center">
+                                        <p className="text-[8px] text-emerald-700 uppercase tracking-wider font-bold mb-0.5">Viernes a Domingo</p>
+                                        <p className="text-lg font-black text-emerald-700 leading-none">+$2,000</p>
+                                        <p className="text-[7px] font-bold text-emerald-600 uppercase mt-1">por noche</p>
+                                    </div>
+                                </div>
+
+                                <div className="text-center pt-2 shrink-0 flex flex-col gap-1 items-center">
+                                    <div className="inline-block bg-slate-100 text-slate-700 text-[10px] font-black px-4 py-1 rounded-full border border-slate-200">
+                                        📲 Reservas: 624 320 3289
+                                    </div>
+                                    <div className="text-slate-400 text-[10px] font-bold tracking-wider mt-0.5">
+                                        <i className="fa-solid fa-globe text-emerald-500"></i> www.casacopal.com.mx
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                        <button onClick={() => handleDownloadFolleto('folleto-depto', 'CasaCopal_Depto.png')} className="bg-blue-600 text-white font-bold py-2.5 px-6 rounded-xl mt-4">Descargar Folleto Depto</button>
                     </div>
                 </div>
