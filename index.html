@@ -130,7 +130,7 @@
           const [toast, setToast] = useState({ show: false, msg: '', type: 'success' });
           const [isAuthChecking, setIsAuthChecking] = useState(true);
           const [dbError, setDbError] = useState(''); 
-          const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); // NUEVO ESTADO PARA EL MENÚ MÓVIL
+          const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); 
 
           const [loginEmail, setLoginEmail] = useState('');
           const [loginPassword, setLoginPassword] = useState('');
@@ -260,12 +260,12 @@
               });
               
               const clientsArray = Object.values(uniqueClients)
-                .filter(c => c.totalSpent > 0) // Excluir cortesías puras (0 pesos gastados)
+                .filter(c => c.totalSpent > 0)
                 .sort((a, b) => {
                   if (b.totalSpent !== a.totalSpent) {
-                    return b.totalSpent - a.totalSpent; // Ordenar por dinero invertido de mayor a menor
+                    return b.totalSpent - a.totalSpent; 
                   }
-                  return b.totalBookings - a.totalBookings; // Desempate: Ordenar por cantidad de reservas
+                  return b.totalBookings - a.totalBookings; 
                 });
                 
               setClients(clientsArray);
@@ -1512,31 +1512,33 @@
                 </form>
               </div>
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                <table className="w-full text-left">
-                  <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-bold border-b border-slate-200"><tr><th className="p-4 text-center w-24">Acciones</th><th className="p-4">Fecha</th><th className="p-4">Descripción</th><th className="p-4">Categoría</th><th className="p-4 text-center">Estado</th><th className="p-4 text-right">Monto</th><th className="p-4">Observaciones</th></tr></thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {expenses.length === 0 ? ( <tr><td colSpan="7" className="p-8 text-center text-slate-400">Sin gastos registrados</td></tr>
-                    ) : expenses.map(e => (
-                      <tr key={e.id} className="hover:bg-slate-50">
-                        <td className="p-4 text-center"><div className="flex items-center justify-center gap-2"><button type="button" onClick={() => handleEdit(e)} className="w-8 h-8 bg-slate-200 text-slate-700 hover:bg-blue-100 hover:text-blue-700 rounded-full flex items-center justify-center shadow-sm"><i className="fa-solid fa-pen text-sm"></i></button><button type="button" onClick={() => handleDeleteExpense(e.id)} className="w-8 h-8 bg-slate-200 text-slate-700 hover:bg-rose-100 hover:text-rose-700 rounded-full flex items-center justify-center shadow-sm"><i className="fa-solid fa-trash text-sm"></i></button></div></td>
-                        <td className="p-4 text-sm font-bold">{e._fechaStr}</td>
-                        <td className="p-4 font-medium text-slate-700">{e._desc} <span className="text-[9px] text-emerald-600 bg-emerald-50 ml-2 px-1 py-0.5 rounded border border-emerald-100">Por: {e.recordedBy || 'Admin'}</span></td>
-                        <td className="p-4 text-xs font-bold uppercase text-slate-400">{e._cat}</td>
-                        <td className="p-4 text-center"><span className={`text-[10px] font-bold px-2 py-1 rounded-md ${e._status === 'Adeudo' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{e._status === 'Adeudo' ? 'ADEUDO' : 'PAGADO'}</span></td>
-                        <td className="p-4 text-right font-black text-rose-600">-${Number(e._monto).toLocaleString()}</td>
-                        <td className="p-4">
-                          {e.notes ? (
-                            <div className="text-[11px] font-bold text-slate-800 bg-amber-100 border border-amber-300 px-2.5 py-1.5 rounded-lg inline-block whitespace-pre-wrap max-w-[200px] shadow-sm">
-                              {e.notes}
-                            </div>
-                          ) : (
-                            <span className="text-xs text-slate-400 font-medium">-</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="overflow-x-auto pb-2">
+                  <table className="w-full text-left min-w-[900px]">
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-bold border-b border-slate-200"><tr><th className="p-4 text-center w-24">Acciones</th><th className="p-4">Fecha</th><th className="p-4">Descripción</th><th className="p-4">Categoría</th><th className="p-4 text-center">Estado</th><th className="p-4 text-right">Monto</th><th className="p-4">Observaciones</th></tr></thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {expenses.length === 0 ? ( <tr><td colSpan="7" className="p-8 text-center text-slate-400">Sin gastos registrados</td></tr>
+                      ) : expenses.map(e => (
+                        <tr key={e.id} className="hover:bg-slate-50">
+                          <td className="p-4 text-center"><div className="flex items-center justify-center gap-2"><button type="button" onClick={() => handleEdit(e)} className="w-8 h-8 bg-slate-200 text-slate-700 hover:bg-blue-100 hover:text-blue-700 rounded-full flex items-center justify-center shadow-sm"><i className="fa-solid fa-pen text-sm"></i></button><button type="button" onClick={() => handleDeleteExpense(e.id)} className="w-8 h-8 bg-slate-200 text-slate-700 hover:bg-rose-100 hover:text-rose-700 rounded-full flex items-center justify-center shadow-sm"><i className="fa-solid fa-trash text-sm"></i></button></div></td>
+                          <td className="p-4 text-sm font-bold">{e._fechaStr}</td>
+                          <td className="p-4 font-medium text-slate-700">{e._desc} <span className="text-[9px] text-emerald-600 bg-emerald-50 ml-2 px-1 py-0.5 rounded border border-emerald-100">Por: {e.recordedBy || 'Admin'}</span></td>
+                          <td className="p-4 text-xs font-bold uppercase text-slate-400">{e._cat}</td>
+                          <td className="p-4 text-center"><span className={`text-[10px] font-bold px-2 py-1 rounded-md ${e._status === 'Adeudo' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{e._status === 'Adeudo' ? 'ADEUDO' : 'PAGADO'}</span></td>
+                          <td className="p-4 text-right font-black text-rose-600">-${Number(e._monto).toLocaleString()}</td>
+                          <td className="p-4">
+                            {e.notes ? (
+                              <div className="text-[11px] font-bold text-slate-800 bg-amber-100 border border-amber-300 px-2.5 py-1.5 rounded-lg inline-block whitespace-pre-wrap max-w-[200px] shadow-sm">
+                                {e.notes}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400 font-medium">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+               </div>
               </div>
               {/* Modal Edición de Gasto */}
               {editingExpense && (
