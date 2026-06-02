@@ -246,17 +246,27 @@
 
               const uniqueClients = {};
               data.filter(b => b._status === 'Anticipado' || b._status === 'Liquidado' || b._status === 'Confirmada').forEach(res => {
-                const rawPhone = res._telefonoStr;
-                if (rawPhone) {
-                  let cleanPhone = rawPhone.replace(/\D/g, '');
-                  if (cleanPhone.length > 10) cleanPhone = cleanPhone.slice(-10);
+                const rawPhone = res._telefonoStr || '';
+                const rawName = res._nombreStr || 'Sin Nombre';
+                
+                // Limpiar el teléfono para agrupar
+                let cleanPhone = rawPhone.replace(/\D/g, '');
+                if (cleanPhone.length > 10) cleanPhone = cleanPhone.slice(-10);
 
-                  if (!uniqueClients[cleanPhone]) {
-                    uniqueClients[cleanPhone] = { id: cleanPhone, name: res._nombreStr, phone: rawPhone, totalBookings: 0, totalSpent: 0 };
-                  }
-                  uniqueClients[cleanPhone].totalBookings += 1;
-                  uniqueClients[cleanPhone].totalSpent += res._precioTotal;
+                // Si no hay teléfono, usamos el nombre en minúsculas como identificador único
+                const clientKey = cleanPhone || rawName.trim().toLowerCase();
+
+                if (!uniqueClients[clientKey]) {
+                  uniqueClients[clientKey] = { 
+                    id: clientKey, 
+                    name: rawName, 
+                    phone: rawPhone || 'Sin teléfono registrado', 
+                    totalBookings: 0, 
+                    totalSpent: 0 
+                  };
                 }
+                uniqueClients[clientKey].totalBookings += 1;
+                uniqueClients[clientKey].totalSpent += res._precioTotal;
               });
               
               const clientsArray = Object.values(uniqueClients)
@@ -1695,7 +1705,7 @@
                                 <ul className="space-y-2 text-[12px] text-slate-700 font-medium flex-1 px-1">
                                     <li className="flex items-start gap-3"><span className="text-emerald-500 text-[14px] mt-[-1px]">✔️</span> <span><strong>Paquete de 7 horas</strong> de servicio.</span></li>
                                     <li className="flex items-start gap-3"><span className="text-emerald-500 text-[14px] mt-[-1px]">✔️</span> <span><strong>Mobiliario listo</strong> para 50 invitados.</span></li>
-                                    <li className="flex items-start gap-3"><span className="text-emerald-500 text-[14px] mt-[-1px]">✔️</span> <span>Área techada fresca con <strong>excelente sombra</strong>.</span></li>
+                                    <li className="flex items-start gap-3"><span className="text-emerald-500 text-[14px] mt-[-1px]">✔️</span> <span>Área interior <strong>con aire acondicionado</strong>.</span></li>
                                     <li className="flex items-start gap-3"><span className="text-emerald-500 text-[14px] mt-[-1px]">✔️</span> <span>Cocina con asador, <strong>estufa y hielera grande</strong>.</span></li>
                                     <li className="flex items-start gap-3"><span className="text-emerald-500 text-[14px] mt-[-1px]">✔️</span> <span><strong>Dos baños</strong> (exterior e interior con regadera).</span></li>
                                     <li className="flex items-start gap-3 bg-emerald-50 p-2 rounded-lg border border-emerald-100"><span className="text-emerald-600 text-[14px] mt-[-1px]">🔊</span> <span className="text-emerald-900"><strong>Bocina Bluetooth</strong> incluida.</span></li>
