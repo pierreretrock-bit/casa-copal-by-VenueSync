@@ -1044,10 +1044,25 @@
             return subtotal - (subtotal * ((form.discount || 0) / 100));
           }, [form.isWeekend, form.includesDepto, form.discount]);
 
+          const normalizeBookingStatus = (booking) => {
+            const total = Number(booking._precioTotal || booking.precio_total || booking.total || 0);
+            const anticipo = Number(booking._anticipo || booking.anticipo || booking.enganche || booking.deposito || 0);
+            const rawStatus = String(booking._status || booking.status || booking.estado || booking.estatus || '').trim().toLowerCase();
+
+            if (total === 0) return 'Liquidado';
+            if (anticipo >= total && total > 0) return 'Liquidado';
+            if (anticipo > 0) return 'Anticipado';
+            if (rawStatus === 'liquidado' || rawStatus === 'pagado' || rawStatus === 'cortesía' || rawStatus === 'cortesia') return 'Liquidado';
+            if (rawStatus === 'anticipado' || rawStatus === 'confirmada' || rawStatus === 'confirmado') return 'Anticipado';
+
+            // Cualquier solicitud web, bloqueo interno o registro sin pago se considera pendiente para filtros.
+            return 'Pendiente';
+          };
+
           const filteredBookings = useMemo(() => {
             const term = bookingSearchTerm.trim().toLowerCase();
             return bookings.filter(b => {
-              const status = b._status === 'Confirmada' ? 'Anticipado' : b._status;
+              const status = normalizeBookingStatus(b);
               const matchesStatus = bookingStatusFilter === 'Todos' || status === bookingStatusFilter;
               if (!matchesStatus) return false;
               if (!term) return true;
@@ -1058,6 +1073,9 @@
                 b._telefonoStr,
                 b._correoStr,
                 status,
+                b._status,
+                b.status,
+                b.estado,
                 b.origen,
                 b.depto_incluido ? 'depto departamento' : 'solo salon',
                 b._precioTotal,
