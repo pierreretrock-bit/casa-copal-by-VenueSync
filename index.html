@@ -311,6 +311,7 @@
                   d._monto = Number(d.amount || d.monto || d.cantidad || d.Total || d.total || 0);
                   d._desc = d.description || d.descripcion || d.concepto || d.detalle || 'Sin descripción';
                   d._cat = d.category || d.categoria || d.tipo || 'General';
+                  d._provider = d.provider || d.proveedor || 'Sin proveedor';
                   d._status = d.status || d.estado || d.estatus || 'Pagado';
                   
                   return { id: doc.id, ...d };
@@ -1021,12 +1022,16 @@
           const [bookingToFree, setBookingToFree] = useState(null); 
           const [editingBooking, setEditingBooking] = useState(null); 
           const [bookingToLiquidate, setBookingToLiquidate] = useState(null);
+          const [bookingSearchTerm, setBookingSearchTerm] = useState('');
+          const [bookingStatusFilter, setBookingStatusFilter] = useState('Todos');
+          const [showBookingFormModal, setShowBookingFormModal] = useState(false);
           
           useEffect(() => {
             if (initialData) {
               const d = new Date(initialData.date + 'T12:00:00');
               const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
               setForm(prev => ({...prev, date: initialData.date, name: initialData.cliente_nombre, phone: initialData.cliente_telefono, email: initialData.cliente_correo || '', includesDepto: initialData.depto_incluido, discount: initialData.descuento_aplicado, isWeekend: isWknd}));
+              setShowBookingFormModal(true);
               showToast('Datos de cotización cargados en el formulario');
               clearInitialData();
             }
@@ -1038,6 +1043,30 @@
             let subtotal = base + (form.includesDepto ? depto : 0);
             return subtotal - (subtotal * ((form.discount || 0) / 100));
           }, [form.isWeekend, form.includesDepto, form.discount]);
+
+          const filteredBookings = useMemo(() => {
+            const term = bookingSearchTerm.trim().toLowerCase();
+            return bookings.filter(b => {
+              const status = b._status === 'Confirmada' ? 'Anticipado' : b._status;
+              const matchesStatus = bookingStatusFilter === 'Todos' || status === bookingStatusFilter;
+              if (!matchesStatus) return false;
+              if (!term) return true;
+
+              const searchText = [
+                b._fechaStr,
+                b._nombreStr,
+                b._telefonoStr,
+                b._correoStr,
+                status,
+                b.origen,
+                b.depto_incluido ? 'depto departamento' : 'solo salon',
+                b._precioTotal,
+                b._anticipo
+              ].join(' ').toLowerCase();
+
+              return searchText.includes(term);
+            });
+          }, [bookings, bookingSearchTerm, bookingStatusFilter]);
 
           const handleExportReservationsToCSV = () => {
             if (bookings.length === 0) {
@@ -1096,6 +1125,7 @@
               });
               showToast(anticipoNum > 0 ? 'Fecha reservada' : 'Fecha bloqueada');
               setForm({ date: '', name: '', phone: '', email: '', isWeekend: false, includesDepto: false, discount: 0, anticipo: '' });
+              setShowBookingFormModal(false);
             } catch(err) { console.error(err); showToast('Error al bloquear', 'error'); }
           };
 
@@ -1233,58 +1263,65 @@
                   <h2 className="text-3xl font-black text-slate-800">Centro de Reservas</h2>
                   <p className="text-slate-500">Unificación de Página Web y Bloqueos Manuales.</p>
                 </div>
-                <button onClick={handleExportReservationsToCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center gap-2">
-                  <FileSpreadsheet className="w-4 h-4"/> Descargar a Excel
+                <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                  <button onClick={() => setShowBookingFormModal(true)} className="bg-slate-900 hover:bg-emerald-600 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2">
+                    <PlusCircle className="w-4 h-4"/> Nueva reserva
+                  </button>
+                  <button onClick={handleExportReservationsToCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2">
+                    <FileSpreadsheet className="w-4 h-4"/> Descargar a Excel
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <h3 className="font-black text-slate-800 flex items-center gap-2"><i className="fa-solid fa-calendar-plus text-emerald-600"></i> Captura de reservas</h3>
+                  <p className="text-sm text-slate-500 font-medium mt-1">El formulario de agendar evento queda oculto para mantener limpia la pantalla. Usa el botón <strong>+ Nueva reserva</strong> cuando necesites bloquear una fecha.</p>
+                </div>
+                <button type="button" onClick={() => setShowBookingFormModal(true)} className="bg-slate-900 hover:bg-emerald-600 text-white text-sm font-bold py-3 px-5 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 shrink-0">
+                  <PlusCircle className="w-4 h-4"/> Nueva reserva
                 </button>
               </div>
 
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><i className="fa-solid fa-lock text-emerald-600"></i> Agendar Evento y Anticipo</h3>
-                <form onSubmit={handleBlockDate} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="md:col-span-2">
-                      <label className="block text-xs font-bold text-slate-500 mb-1">Nombre del Cliente</label>
-                      <input type="text" placeholder="Ej. Familia López" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required/>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-1">Teléfono</label>
-                      <input type="tel" placeholder="Ej. 624..." className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-1">Correo (Opcional)</label>
-                      <input type="email" placeholder="correo@..." className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <div className="flex flex-col lg:flex-row gap-4 lg:items-end lg:justify-between">
+                  <div className="flex-1">
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5">Buscar reserva</label>
+                    <div className="relative">
+                      <i className="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                      <input
+                        type="text"
+                        placeholder="Buscar por cliente, teléfono, correo, fecha, estado u origen..."
+                        className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-medium text-slate-700"
+                        value={bookingSearchTerm}
+                        onChange={e => setBookingSearchTerm(e.target.value)}
+                      />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 items-end">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-1">Fecha</label>
-                      <input type="date" required className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.date} onChange={e => {
-                        const d = new Date(e.target.value + 'T12:00:00');
-                        const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-                        setForm({...form, date: e.target.value, isWeekend: isWknd});
-                      }} />
+                  <div className="w-full lg:w-56">
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5">Estado</label>
+                    <select
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700"
+                      value={bookingStatusFilter}
+                      onChange={e => setBookingStatusFilter(e.target.value)}
+                    >
+                      <option value="Todos">Todos</option>
+                      <option value="Pendiente">Pendiente</option>
+                      <option value="Anticipado">Anticipado</option>
+                      <option value="Liquidado">Liquidado</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center justify-between lg:justify-end gap-3">
+                    <div className="text-xs font-bold text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 whitespace-nowrap">
+                      Mostrando <span className="text-slate-900 font-black">{filteredBookings.length}</span> de <span className="text-slate-900 font-black">{bookings.length}</span>
                     </div>
-                    <div className="flex items-center justify-center h-[44px]">
-                      <label className="flex items-center gap-2 text-sm font-bold cursor-pointer text-slate-700 bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-lg w-full">
-                        <input type="checkbox" className="w-4 h-4 text-emerald-600 rounded" checked={form.includesDepto} onChange={e => setForm({...form, includesDepto: e.target.checked})} /> + Depto
-                      </label>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-blue-600 mb-1">Descuento (%)</label>
-                      <input type="number" min="0" max="100" placeholder="0" className="w-full p-2.5 bg-blue-50 border border-blue-200 text-blue-700 font-bold rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm" value={form.discount || ''} onChange={e => setForm({...form, discount: e.target.value})} />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-emerald-600 mb-1">Anticipo ($)</label>
-                      <input type="number" required placeholder="0" className="w-full p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.anticipo} onChange={e => setForm({...form, anticipo: e.target.value})} />
-                      <p className="text-[10px] text-slate-500 mt-1 font-bold absolute">Total: ${calculatedTotal.toLocaleString()}</p>
-                    </div>
-                    <div className="col-span-2 md:col-span-1">
-                      <button type="submit" className="bg-slate-900 text-white font-bold py-2.5 rounded-lg hover:bg-slate-800 transition-colors w-full flex items-center justify-center gap-2 shadow-md">
-                        <i className="fa-solid fa-save"></i> Guardar
+                    {(bookingSearchTerm || bookingStatusFilter !== 'Todos') && (
+                      <button type="button" onClick={() => { setBookingSearchTerm(''); setBookingStatusFilter('Todos'); }} className="text-xs font-black text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-100 rounded-xl px-4 py-3 transition-colors whitespace-nowrap">
+                        Limpiar
                       </button>
-                    </div>
+                    )}
                   </div>
-                </form>
+                </div>
               </div>
 
               <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
@@ -1307,7 +1344,9 @@
                     <tbody className="divide-y divide-slate-50">
                       {bookings.length === 0 ? (
                         <tr><td colSpan="6" className="p-12 text-center text-slate-400 font-bold">Sin eventos en la base de datos</td></tr>
-                      ) : bookings.map(b => {
+                      ) : filteredBookings.length === 0 ? (
+                        <tr><td colSpan="6" className="p-12 text-center text-slate-400 font-bold">No hay reservas que coincidan con la búsqueda o filtro seleccionado</td></tr>
+                      ) : filteredBookings.map(b => {
                         const total = b._precioTotal;
                         const anticipo = b._anticipo;
                         const saldo = total - anticipo;
@@ -1385,6 +1424,78 @@
                 </div>
               </div>
 
+              {showBookingFormModal && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
+                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden">
+                    <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center">
+                      <div>
+                        <h3 className="font-black text-xl text-slate-800 flex items-center gap-2"><i className="fa-solid fa-lock text-emerald-600"></i> Nueva reserva / bloqueo</h3>
+                        <p className="text-xs text-slate-500 mt-1 font-bold">Agendar evento, registrar anticipo y bloquear fecha.</p>
+                      </div>
+                      <button type="button" onClick={() => setShowBookingFormModal(false)} className="w-8 h-8 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"><i className="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <form onSubmit={handleBlockDate} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Nombre del Cliente</label>
+                        <input type="text" placeholder="Ej. Familia López" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required/>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Teléfono</label>
+                          <input type="tel" placeholder="Ej. 624..." className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Correo (Opcional)</label>
+                          <input type="email" placeholder="correo@..." className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Fecha</label>
+                          <input type="date" required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700" value={form.date} onChange={e => {
+                            const d = new Date(e.target.value + 'T12:00:00');
+                            const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+                            setForm({...form, date: e.target.value, isWeekend: isWknd});
+                          }} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1.5">Descuento (%)</label>
+                          <input type="number" min="0" max="100" placeholder="0" className="w-full p-3 bg-blue-50 border border-blue-200 text-blue-700 font-black rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm" value={form.discount || ''} onChange={e => setForm({...form, discount: e.target.value})} />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <label className="flex items-center gap-3 text-sm font-bold cursor-pointer text-slate-700 bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl w-full">
+                          <input type="checkbox" className="w-4 h-4 text-emerald-600 rounded" checked={form.includesDepto} onChange={e => setForm({...form, includesDepto: e.target.checked})} />
+                          <span>Incluye Departamento</span>
+                        </label>
+                        <div>
+                          <label className="block text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1.5">Anticipo ($)</label>
+                          <input type="number" required placeholder="0" className="w-full p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 font-black rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.anticipo} onChange={e => setForm({...form, anticipo: e.target.value})} />
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-center justify-between">
+                        <div>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total calculado</p>
+                          <p className="text-sm text-slate-500 font-medium">Según día, departamento y descuento.</p>
+                        </div>
+                        <p className="text-2xl font-black text-emerald-600">${calculatedTotal.toLocaleString()}</p>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                        <button type="button" onClick={() => setShowBookingFormModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 rounded-xl transition-colors">Cancelar</button>
+                        <button type="submit" className="flex-1 bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-emerald-600 transition-colors shadow-lg flex items-center justify-center gap-2">
+                          <i className="fa-solid fa-save"></i> Guardar reserva
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
               {/* Modales Reserva */}
               {editingBooking && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
@@ -1427,24 +1538,101 @@
                   </div>
                 </div>
               )}
+              <button
+                type="button"
+                onClick={() => setShowBookingFormModal(true)}
+                className="md:hidden fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-emerald-600 text-white shadow-2xl flex items-center justify-center hover:bg-emerald-700 transition-colors"
+                title="Nueva reserva"
+              >
+                <PlusCircle className="w-7 h-7"/>
+              </button>
+
             </div>
           );
         }
 
         function ExpensesModule({ db, expenses, expenseCategories, activeProfile, showToast, callGeminiAI }) {
-          const [form, setForm] = useState({ date: new Date().toISOString().split('T')[0], category: '', amount: '', description: '', status: 'Pagado', notes: '' });
+          const emptyExpenseForm = () => ({
+            date: new Date().toISOString().split('T')[0],
+            category: expenseCategories[0]?.name || '',
+            provider: '',
+            amount: '',
+            description: '',
+            status: 'Pagado',
+            notes: ''
+          });
+
+          const [form, setForm] = useState(emptyExpenseForm());
           const [editingExpense, setEditingExpense] = useState(null);
           const [showCatModal, setShowCatModal] = useState(false);
           const [newCatName, setNewCatName] = useState('');
           const [aiPrompt, setAiPrompt] = useState('');
           const [isAiLoading, setIsAiLoading] = useState(false);
+          const [showExpenseFormModal, setShowExpenseFormModal] = useState(false);
+          const [expenseFilters, setExpenseFilters] = useState({ search: '', category: 'Todas', status: 'Todos' });
 
-          useEffect(() => { if (expenseCategories.length > 0 && !form.category) setForm(f => ({ ...f, category: expenseCategories[0].name })); }, [expenseCategories]);
+          useEffect(() => {
+            if (expenseCategories.length > 0 && !form.category) {
+              setForm(f => ({ ...f, category: expenseCategories[0].name }));
+            }
+          }, [expenseCategories]);
+
+          const filteredExpenses = useMemo(() => {
+            const search = expenseFilters.search.trim().toLowerCase();
+            return expenses.filter(e => {
+              const matchesSearch = !search || [
+                e._desc,
+                e._cat,
+                e._provider,
+                e._status,
+                e.notes,
+                e.recordedBy,
+                e._fechaStr
+              ].some(value => String(value || '').toLowerCase().includes(search));
+
+              const matchesCategory = expenseFilters.category === 'Todas' || e._cat === expenseFilters.category;
+              const matchesStatus = expenseFilters.status === 'Todos' || e._status === expenseFilters.status;
+
+              return matchesSearch && matchesCategory && matchesStatus;
+            });
+          }, [expenses, expenseFilters]);
+
+          const totalFilteredExpenses = useMemo(() => {
+            return filteredExpenses
+              .filter(e => e._status === 'Pagado' || !e._status)
+              .reduce((sum, e) => sum + Number(e._monto || 0), 0);
+          }, [filteredExpenses]);
+
+          const totalDebtExpenses = useMemo(() => {
+            return filteredExpenses
+              .filter(e => e._status === 'Adeudo')
+              .reduce((sum, e) => sum + Number(e._monto || 0), 0);
+          }, [filteredExpenses]);
+
+          const expensesByCategory = useMemo(() => {
+            const grouped = {};
+            filteredExpenses
+              .filter(e => e._status === 'Pagado' || !e._status)
+              .forEach(e => {
+                const cat = e._cat || 'General';
+                grouped[cat] = (grouped[cat] || 0) + Number(e._monto || 0);
+              });
+            return Object.entries(grouped)
+              .map(([category, total]) => ({ category, total }))
+              .sort((a, b) => b.total - a.total)
+              .slice(0, 8);
+          }, [filteredExpenses]);
+
+          const maxCategoryExpense = useMemo(() => {
+            return Math.max(...expensesByCategory.map(item => item.total), 1);
+          }, [expensesByCategory]);
+
+          const chartColors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#f97316', '#64748b'];
 
           const handleExportExpensesToCSV = () => {
-            if (expenses.length === 0) return showToast('No hay gastos para exportar', 'error');
-            const csvContent = ['Fecha,Descripción,Categoría,Estado,Monto,Registrado Por,Observaciones'].concat(
-              expenses.map(e => `${e._fechaStr},"${e._desc}",${e._cat},${e._status},${e._monto},"${e.recordedBy||''}","${e.notes||''}"`)
+            if (filteredExpenses.length === 0) return showToast('No hay gastos para exportar', 'error');
+            const csvContent = ['Fecha,Proveedor,Descripción,Categoría,Estado,Monto,Registrado Por,Observaciones'].concat(
+              filteredExpenses.map(e => `${e._fechaStr},"${e._provider || ''}","${e._desc}",${e._cat},${e._status},${e._monto},"${e.recordedBy||''}","${e.notes||''}"`)
             ).join('\n');
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
@@ -1458,20 +1646,46 @@
             e.preventDefault();
             try {
               if (editingExpense) {
-                await updateDoc(doc(db, 'gastos', editingExpense.id), { date: editingExpense.date, category: editingExpense.category, amount: Number(editingExpense.amount), description: editingExpense.description, status: editingExpense.status, notes: editingExpense.notes || '' });
-                showToast('Gasto actualizado'); setEditingExpense(null);
+                await updateDoc(doc(db, 'gastos', editingExpense.id), {
+                  date: editingExpense.date,
+                  category: editingExpense.category,
+                  provider: editingExpense.provider || '',
+                  amount: Number(editingExpense.amount),
+                  description: editingExpense.description,
+                  status: editingExpense.status,
+                  notes: editingExpense.notes || ''
+                });
+                showToast('Gasto actualizado');
+                setEditingExpense(null);
               } else {
-                await addDoc(collection(db, 'gastos'), { ...form, category: form.category || (expenseCategories[0]?.name || 'General'), amount: Number(form.amount), recordedBy: activeProfile.name, timestamp: Date.now() });
+                await addDoc(collection(db, 'gastos'), {
+                  ...form,
+                  category: form.category || (expenseCategories[0]?.name || 'General'),
+                  provider: form.provider || '',
+                  amount: Number(form.amount),
+                  recordedBy: activeProfile.name,
+                  timestamp: Date.now()
+                });
                 showToast('Gasto registrado');
               }
-              setForm({ date: new Date().toISOString().split('T')[0], category: expenseCategories[0]?.name || '', amount: '', description: '', status: 'Pagado', notes: '' });
+              setForm(emptyExpenseForm());
+              setShowExpenseFormModal(false);
               setAiPrompt('');
             } catch(err) { showToast('Error al guardar: ' + err.message, 'error'); }
           };
 
           const handleEdit = (expense) => {
             try {
-              setEditingExpense({ id: expense.id, date: expense._fechaStr || expense.date || new Date().toISOString().split('T')[0], category: expense._cat || expense.category || '', amount: String(expense._monto ?? expense.amount ?? 0), description: expense._desc || expense.description || '', status: expense._status || expense.status || 'Pagado', notes: expense.notes || '' });
+              setEditingExpense({
+                id: expense.id,
+                date: expense._fechaStr || expense.date || new Date().toISOString().split('T')[0],
+                category: expense._cat || expense.category || '',
+                provider: expense._provider || expense.provider || '',
+                amount: String(expense._monto ?? expense.amount ?? 0),
+                description: expense._desc || expense.description || '',
+                status: expense._status || expense.status || 'Pagado',
+                notes: expense.notes || ''
+              });
             } catch (err) { showToast("No se pudo abrir el gasto para edición", "error"); }
           };
 
@@ -1484,53 +1698,190 @@
               setIsAiLoading(true);
               try {
                   const catList = expenseCategories.map(c => c.name).join(', ');
-                  const result = await callGeminiAI(`Analiza este texto de un gasto de un salón de eventos y extrae los datos en formato JSON estricto con las claves: "monto" (solo números), "descripcion" (texto breve capitalizado), y "categoria" (debes elegir exactamente UNA de esta lista: ${catList}. Si ninguna cuadra usa "General"). Texto: "${aiPrompt}"`, true);
-                  if(result && result.monto) { setForm(p => ({...p, amount: result.monto.toString(), description: result.descripcion || p.description, category: result.categoria || p.category})); showToast('✨ Formulario autocompletado'); }
+                  const result = await callGeminiAI(`Analiza este texto de un gasto de un salón de eventos y extrae los datos en formato JSON estricto con las claves: "monto" (solo números), "descripcion" (texto breve capitalizado), "proveedor" (nombre del negocio o persona a quien se pagó) y "categoria" (debes elegir exactamente UNA de esta lista: ${catList}. Si ninguna cuadra usa "General"). Texto: "${aiPrompt}"`, true);
+                  if(result && result.monto) {
+                    setForm(p => ({
+                      ...p,
+                      amount: result.monto.toString(),
+                      description: result.descripcion || p.description,
+                      provider: result.proveedor || p.provider,
+                      category: result.categoria || p.category
+                    }));
+                    setShowExpenseFormModal(true);
+                    showToast('✨ Formulario autocompletado');
+                  }
               } catch (err) { showToast('IA: ' + (err.message || 'Error desconocido'), 'error'); } finally { setIsAiLoading(false); }
           };
 
           return (
             <div className="animate-fade-in space-y-6 relative">
-              <div className="flex justify-between items-end">
-                <div><h2 className="text-3xl font-black text-slate-800">Gastos Operativos</h2><p className="text-slate-500 font-medium">Solo los gastos <span className="text-emerald-600 font-bold">Pagados</span> se restarán de tus utilidades.</p></div>
-                <button onClick={handleExportExpensesToCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center gap-2"><FileSpreadsheet className="w-4 h-4"/> Descargar a Excel</button>
+              <div className="flex flex-col md:flex-row justify-between md:items-end gap-4">
+                <div>
+                  <h2 className="text-3xl font-black text-slate-800">Gastos Operativos</h2>
+                  <p className="text-slate-500 font-medium">Solo los gastos <span className="text-emerald-600 font-bold">Pagados</span> se restarán de tus utilidades.</p>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                  <button type="button" onClick={() => setShowExpenseFormModal(true)} className="bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold py-2.5 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 w-full sm:w-fit"><PlusCircle className="w-4 h-4"/> Nuevo gasto</button>
+                  <button onClick={handleExportExpensesToCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2.5 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 w-full sm:w-fit"><FileSpreadsheet className="w-4 h-4"/> Descargar a Excel</button>
+                </div>
               </div>
+
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div className="flex flex-col md:flex-row justify-between md:items-end gap-3 mb-5">
+                  <div>
+                    <h3 className="font-black text-slate-800 text-lg">Gastos pagados por categoría</h3>
+                    <p className="text-xs text-slate-500 font-medium">Gráfica calculada con los filtros activos. Pasa el mouse sobre una barra para ver el monto.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest">
+                    <span className="bg-slate-100 text-slate-500 px-3 py-1.5 rounded-full border border-slate-200">{filteredExpenses.length} registros</span>
+                    <span className="bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full border border-amber-100">Adeudos filtrados disponibles</span>
+                  </div>
+                </div>
+
+                {expensesByCategory.length === 0 ? (
+                  <div className="bg-slate-50 border border-dashed border-slate-200 rounded-2xl p-8 text-center">
+                    <p className="text-sm font-bold text-slate-400">No hay gastos pagados para graficar con estos filtros.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {expensesByCategory.map((item, index) => {
+                      const percent = Math.max((item.total / maxCategoryExpense) * 100, 6);
+                      const color = chartColors[index % chartColors.length];
+                      return (
+                        <div key={item.category} className="group relative">
+                          <div className="flex justify-between items-center mb-1.5 gap-3">
+                            <p className="text-xs font-black uppercase tracking-widest text-slate-600 truncate">{item.category}</p>
+                            <p className="text-[10px] font-bold text-slate-400 md:hidden">Toca la barra</p>
+                          </div>
+                          <div className="h-9 bg-slate-100 rounded-full overflow-visible border border-slate-200 relative shadow-inner">
+                            <div
+                              className="h-full rounded-full transition-all duration-300 group-hover:brightness-95 shadow-sm flex items-center justify-end pr-3"
+                              style={{ width: `${percent}%`, backgroundColor: color }}
+                            >
+                              <span className="text-white text-[10px] font-black uppercase tracking-widest hidden sm:inline">{Math.round(percent)}%</span>
+                            </div>
+                            <div className="pointer-events-none absolute right-2 -top-12 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity bg-slate-900 text-white text-xs font-black px-3 py-2 rounded-xl shadow-xl z-20 whitespace-nowrap">
+                              {item.category}: ${item.total.toLocaleString('es-MX')}
+                              <div className="absolute left-1/2 -bottom-1 w-2 h-2 bg-slate-900 rotate-45"></div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h3 className="font-black text-slate-800 mb-4">Filtros de búsqueda</h3>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Buscar</label>
+                    <input type="text" placeholder="Ej. limpieza, Walmart, agua, factura..." className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={expenseFilters.search} onChange={e=>setExpenseFilters({...expenseFilters, search: e.target.value})}/>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Categoría</label>
+                    <select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={expenseFilters.category} onChange={e=>setExpenseFilters({...expenseFilters, category: e.target.value})}>
+                      <option value="Todas">Todas</option>
+                      {expenseCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Estado</label>
+                    <select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={expenseFilters.status} onChange={e=>setExpenseFilters({...expenseFilters, status: e.target.value})}>
+                      <option value="Todos">Todos</option>
+                      <option value="Pagado">Pagado</option>
+                      <option value="Adeudo">Adeudo</option>
+                    </select>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setExpenseFilters({ search: '', category: 'Todas', status: 'Todos' })} className="mt-4 text-xs font-bold text-slate-500 hover:text-slate-800 underline">Limpiar filtros</button>
+              </div>
+
               <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-2xl shadow-sm border border-indigo-100 flex flex-col md:flex-row gap-4 items-center">
                   <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm shrink-0"><Sparkles className="text-indigo-500 w-6 h-6" /></div>
                   <div className="flex-1 w-full"><h4 className="text-sm font-bold text-indigo-900 mb-1">Registro Mágico</h4>
-                      <div className="flex gap-2">
+                      <div className="flex flex-col md:flex-row gap-2">
                           <input type="text" placeholder='Ej. "Compré cloro en Walmart por 500 pesos"' className="w-full p-3 bg-white border border-indigo-200 rounded-xl focus:ring-2 focus:ring-indigo-400 outline-none text-sm text-slate-700" value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAIParse()} />
-                          <button onClick={handleAIParse} disabled={isAiLoading} className="bg-indigo-600 text-white font-bold px-6 rounded-xl hover:bg-indigo-700 transition-colors shrink-0 shadow-md disabled:opacity-50 flex items-center justify-center min-w-[150px]">{isAiLoading ? <Loader2 className="w-5 h-5 animate-spin mx-auto"/> : '✨ Autocompletar'}</button>
+                          <button onClick={handleAIParse} disabled={isAiLoading} className="bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors shrink-0 shadow-md disabled:opacity-50 flex items-center justify-center min-w-[150px]">{isAiLoading ? <Loader2 className="w-5 h-5 animate-spin mx-auto"/> : '✨ Autocompletar'}</button>
                       </div>
                   </div>
               </div>
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <form onSubmit={handleSaveExpense} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="flex justify-between items-center text-xs font-bold text-slate-500 mb-1">Categoría <button type="button" onClick={() => setShowCatModal(true)} className="text-emerald-600 hover:text-emerald-700 flex items-center gap-1"><Settings className="w-3 h-3"/> Administrar</button></label>
-                      <select required className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.category} onChange={e=>setForm({...form, category: e.target.value})}>{expenseCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
+
+              {showExpenseFormModal && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
+                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden max-h-[92vh] flex flex-col">
+                    <div className="bg-slate-50 p-5 border-b border-slate-100 flex justify-between items-center shrink-0">
+                      <div>
+                        <h3 className="font-black text-xl text-slate-800">Nuevo gasto</h3>
+                        <p className="text-xs text-slate-500 mt-1 font-bold">Captura fecha, proveedor, categoría, monto y observaciones.</p>
+                      </div>
+                      <button type="button" onClick={() => setShowExpenseFormModal(false)} className="w-9 h-9 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"><i className="fa-solid fa-xmark"></i></button>
                     </div>
-                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Monto ($)</label><input type="number" required min="1" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.amount} onChange={e=>setForm({...form, amount: e.target.value})}/></div>
-                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Descripción</label><input type="text" required placeholder="Ej. Pintura blanca" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.description} onChange={e=>setForm({...form, description: e.target.value})}/></div>
+
+                    <form onSubmit={handleSaveExpense} className="p-5 space-y-4 overflow-y-auto">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Fecha</label>
+                          <input type="date" required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={form.date} onChange={e=>setForm({...form, date: e.target.value})}/>
+                        </div>
+                        <div>
+                          <label className="flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Categoría <button type="button" onClick={() => setShowCatModal(true)} className="normal-case tracking-normal text-emerald-600 hover:text-emerald-700 flex items-center gap-1"><Settings className="w-3 h-3"/> Administrar</button></label>
+                          <select required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={form.category} onChange={e=>setForm({...form, category: e.target.value})}>{expenseCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Proveedor</label>
+                          <input type="text" placeholder="Ej. Walmart, CFE, Jardinero" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={form.provider} onChange={e=>setForm({...form, provider: e.target.value})}/>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Monto ($)</label>
+                          <input type="number" required min="1" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-black text-rose-600" value={form.amount} onChange={e=>setForm({...form, amount: e.target.value})}/>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Descripción</label>
+                        <input type="text" required placeholder="Ej. Cloro, agua, pintura, mantenimiento" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={form.description} onChange={e=>setForm({...form, description: e.target.value})}/>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Estado</label>
+                          <select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={form.status} onChange={e=>setForm({...form, status: e.target.value})}><option value="Pagado">Pagado</option><option value="Adeudo">Adeudo</option></select>
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Observaciones</label>
+                          <input type="text" placeholder="Ej. Factura pendiente" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})}/>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-3 pt-2 border-t border-slate-100">
+                        <button type="button" onClick={() => setShowExpenseFormModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 rounded-xl transition-colors">Cancelar</button>
+                        <button type="submit" className="flex-1 bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-emerald-600 transition-colors shadow-lg">Guardar gasto</button>
+                      </div>
+                    </form>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Estado</label><select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.status} onChange={e=>setForm({...form, status: e.target.value})}><option value="Pagado">Pagado</option><option value="Adeudo">Adeudo</option></select></div>
-                    <div className="md:col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Observaciones (Opcional)</label><input type="text" placeholder="Ej. Factura pendiente" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})}/></div>
-                    <div><button type="submit" className="w-full bg-slate-900 text-white font-bold py-2.5 px-4 rounded-lg hover:bg-slate-800 transition-colors shadow-md">Guardar Nuevo</button></div>
-                  </div>
-                </form>
-              </div>
+                </div>
+              )}
+
+              <button type="button" onClick={() => setShowExpenseFormModal(true)} className="fixed bottom-6 right-6 z-40 md:hidden w-14 h-14 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center hover:bg-emerald-600 transition-colors" title="Nuevo gasto">
+                <PlusCircle className="w-7 h-7"/>
+              </button>
+
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="overflow-x-auto pb-2">
-                  <table className="w-full text-left min-w-[900px]">
-                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-bold border-b border-slate-200"><tr><th className="p-4 text-center w-24">Acciones</th><th className="p-4">Fecha</th><th className="p-4">Descripción</th><th className="p-4">Categoría</th><th className="p-4 text-center">Estado</th><th className="p-4 text-right">Monto</th><th className="p-4">Observaciones</th></tr></thead>
+                  <table className="w-full text-left min-w-[1050px]">
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-bold border-b border-slate-200"><tr><th className="p-4 text-center w-24">Acciones</th><th className="p-4">Fecha</th><th className="p-4">Proveedor</th><th className="p-4">Descripción</th><th className="p-4">Categoría</th><th className="p-4 text-center">Estado</th><th className="p-4 text-right">Monto</th><th className="p-4">Observaciones</th></tr></thead>
                     <tbody className="divide-y divide-slate-100">
-                      {expenses.length === 0 ? ( <tr><td colSpan="7" className="p-8 text-center text-slate-400">Sin gastos registrados</td></tr>
-                      ) : expenses.map(e => (
+                      {filteredExpenses.length === 0 ? ( <tr><td colSpan="8" className="p-8 text-center text-slate-400">Sin gastos registrados con esos filtros</td></tr>
+                      ) : filteredExpenses.map(e => (
                         <tr key={e.id} className="hover:bg-slate-50">
                           <td className="p-4 text-center"><div className="flex items-center justify-center gap-2"><button type="button" onClick={() => handleEdit(e)} className="w-8 h-8 bg-slate-200 text-slate-700 hover:bg-blue-100 hover:text-blue-700 rounded-full flex items-center justify-center shadow-sm"><i className="fa-solid fa-pen text-sm"></i></button><button type="button" onClick={() => handleDeleteExpense(e.id)} className="w-8 h-8 bg-slate-200 text-slate-700 hover:bg-rose-100 hover:text-rose-700 rounded-full flex items-center justify-center shadow-sm"><i className="fa-solid fa-trash text-sm"></i></button></div></td>
                           <td className="p-4 text-sm font-bold">{e._fechaStr}</td>
+                          <td className="p-4 text-sm font-black text-slate-700">{e._provider || 'Sin proveedor'}</td>
                           <td className="p-4 font-medium text-slate-700">{e._desc} <span className="text-[9px] text-emerald-600 bg-emerald-50 ml-2 px-1 py-0.5 rounded border border-emerald-100">Por: {e.recordedBy || 'Admin'}</span></td>
                           <td className="p-4 text-xs font-bold uppercase text-slate-400">{e._cat}</td>
                           <td className="p-4 text-center"><span className={`text-[10px] font-bold px-2 py-1 rounded-md ${e._status === 'Adeudo' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{e._status === 'Adeudo' ? 'ADEUDO' : 'PAGADO'}</span></td>
@@ -1550,13 +1901,14 @@
                   </table>
                </div>
               </div>
-              {/* Modal Edición de Gasto */}
+
               {editingExpense && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
                   <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-0">
                     <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center"><div><h3 className="font-black text-xl text-slate-800">Editar Gasto</h3></div><button type="button" onClick={() => setEditingExpense(null)} className="w-8 h-8 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"><i className="fa-solid fa-xmark"></i></button></div>
                     <form onSubmit={handleSaveExpense} className="p-6 space-y-4">
                       <div className="grid grid-cols-2 gap-4"><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Fecha</label><input type="date" className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.date} onChange={e => setEditingExpense({...editingExpense, date: e.target.value})} required/></div><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Categoría</label><select className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.category} onChange={e => setEditingExpense({...editingExpense, category: e.target.value})} required>{expenseCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div></div>
+                      <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Proveedor</label><input type="text" className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.provider || ''} onChange={e => setEditingExpense({...editingExpense, provider: e.target.value})}/></div>
                       <div className="grid grid-cols-2 gap-4"><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Monto ($)</label><input type="number" className="w-full p-3 bg-slate-50 border rounded-xl outline-none text-rose-600 font-bold" value={editingExpense.amount} onChange={e => setEditingExpense({...editingExpense, amount: e.target.value})} required/></div><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Estado</label><select className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.status} onChange={e => setEditingExpense({...editingExpense, status: e.target.value})}><option value="Pagado">Pagado</option><option value="Adeudo">Adeudo</option></select></div></div>
                       <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Descripción</label><input type="text" className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.description} onChange={e => setEditingExpense({...editingExpense, description: e.target.value})} required/></div>
                       <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Observaciones</label><textarea className="w-full p-3 bg-slate-50 border rounded-xl outline-none resize-none" rows="2" value={editingExpense.notes} onChange={e => setEditingExpense({...editingExpense, notes: e.target.value})}></textarea></div>
@@ -1565,6 +1917,7 @@
                   </div>
                 </div>
               )}
+
               {showCatModal && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
                   <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-6">
