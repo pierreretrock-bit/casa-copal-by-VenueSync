@@ -37,7 +37,7 @@
         import { createRoot } from 'react-dom/client';
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
-        import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, setDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+        import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, getDoc, setDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
         import { LayoutDashboard, CalendarDays, WalletCards, Users, Megaphone, PlusCircle, LogOut, CheckCircle2, AlertCircle, TrendingUp, FileText, Copy, Smartphone, Download, UserCircle, Settings, Lock, Sparkles, Loader2, FileSpreadsheet } from 'lucide-react';
 
         // ============================================================================
@@ -554,7 +554,7 @@
 
               <main className="flex-1 overflow-y-auto relative w-full">
                 {toast.show && (
-                  <div className={`absolute top-6 right-6 z-50 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3 text-white transform transition-all ${toast.type === 'success' ? 'bg-emerald-600' : 'bg-rose-600'}`}>
+                  <div className={`fixed top-6 right-6 z-[200] px-6 py-3 rounded-xl shadow-lg flex items-center gap-3 text-white transform transition-all max-w-[calc(100vw-2rem)] ${toast.type === 'success' ? 'bg-emerald-600' : 'bg-rose-600'}`}>
                     {toast.type === 'success' ? <CheckCircle2 className="w-5 h-5"/> : <AlertCircle className="w-5 h-5"/>}
                     <span className="font-semibold text-sm">{toast.msg}</span>
                   </div>
@@ -627,7 +627,7 @@
                   
                   {activeTab === 'clients' && activeProfile.canViewAll && <ClientsModule db={db} clients={clients} clientNotes={clientNotes} showToast={showToast} />}
                   
-                  {activeTab === 'marketing' && activeProfile.canViewAll && <MarketingHub handleCopyText={handleCopyText} showToast={showToast} callGeminiAI={callGeminiAI} />}
+                  {activeTab === 'marketing' && activeProfile.canViewAll && <MarketingHub db={db} bookings={bookings} handleCopyText={handleCopyText} showToast={showToast} callGeminiAI={callGeminiAI} onReservationCreated={() => setActiveTab('bookings')} />}
                 </div>
               </main>
             </div>
@@ -2113,8 +2113,8 @@
           );
         }
 
-        function MarketingHub({ handleCopyText, showToast, callGeminiAI }) {
-          const [contractData, setContractData] = useState({ client: '', date: '', type: '', startTime: '', endTime: '', salon: '', depto: '', discount: '', deposit: '' });
+        function MarketingHub({ db, bookings, handleCopyText, showToast, callGeminiAI, onReservationCreated }) {
+          const [contractData, setContractData] = useState({ client: '', phone: '', email: '', date: '', type: '', startTime: '', endTime: '', salon: '', depto: '', discount: '', deposit: '' });
           const [generatedContract, setGeneratedContract] = useState('');
           const [lockCode, setLockCode] = useState('');
           const [manualIncludesDepto, setManualIncludesDepto] = useState(false);
@@ -2125,6 +2125,11 @@
           const [generatedPost, setGeneratedPost] = useState('');
           const [isAiLoading, setIsAiLoading] = useState(false);
           const [copiedPost, setCopiedPost] = useState(false);
+          const [contractReservationNotice, setContractReservationNotice] = useState(null);
+
+          const setContractNotice = (msg, type = 'info') => {
+            setContractReservationNotice({ msg, type });
+          };
 
           const handleGeneratePost = async () => {
               if(!aiPostTopic.trim()) return showToast('Escribe de qué tratará tu post', 'error');
@@ -2136,9 +2141,82 @@
               } catch (err) { showToast('IA: ' + (err.message || 'Error desconocido'), 'error'); } finally { setIsAiLoading(false); }
           };
 
+          const calculateContractTotals = () => {
+            const salon = Number(contractData.salon) || 0;
+            const depto = Number(contractData.depto) || 0;
+            const discountPct = Number(contractData.discount) || 0;
+            const deposit = Number(contractData.deposit) || 0;
+            const subtotal = salon + depto;
+            const discountAmount = subtotal * (discountPct / 100);
+            const total = Math.max(0, subtotal - discountAmount);
+            const balance = total - deposit;
+            return { salon, depto, discountPct, deposit, subtotal, discountAmount, total, balance };
+          };
+
+          const handleCreateReservationFromContract = async () => {
+            setContractReservationNotice(null);
+            const client = contractData.client.trim();
+            const date = contractData.date;
+            if (!client || !date) {
+              setContractNotice('Cliente y fecha son obligatorios para crear la reserva.', 'error');
+              return showToast('Cliente y fecha son obligatorios para crear la reserva', 'error');
+            }
+
+            const { salon, depto, discountPct, deposit, total } = calculateContractTotals();
+            if (total <= 0) {
+              setContractNotice('El total del contrato debe ser mayor a $0.', 'error');
+              return showToast('El total del contrato debe ser mayor a $0', 'error');
+            }
+
+            try {
+              // Validación local rápida y validación directa en Firestore.
+              // La validación directa evita sobrescribir una fecha aunque la lista local de bookings no se haya actualizado todavía.
+              const isDateAlreadyBookedLocal = bookings.some(b => b._fechaStr === date || b.date === date || b.id === date);
+              const reservationRef = doc(db, 'reservaciones', date);
+              const existingReservation = await getDoc(reservationRef);
+
+              if (isDateAlreadyBookedLocal || existingReservation.exists()) {
+                const occupiedMsg = '⚠️ Esta fecha ya está reservada o bloqueada. No se creó otra reserva.';
+                setContractNotice(occupiedMsg, 'error');
+                showToast(occupiedMsg, 'error');
+                return;
+              }
+
+              const newStatus = deposit > 0 ? 'Anticipado' : 'Pendiente';
+
+              await setDoc(reservationRef, {
+                date,
+                status: newStatus,
+                precio_total: total,
+                base_event_total: total,
+                extras: [],
+                extras_total: 0,
+                anticipo: deposit,
+                depto_incluido: depto > 0,
+                cliente_nombre: client,
+                cliente_telefono: contractData.phone || '',
+                cliente_correo: contractData.email || '',
+                tipo_evento: contractData.type || '',
+                horario_inicio: contractData.startTime || '',
+                horario_fin: contractData.endTime || '',
+                costo_salon: salon,
+                costo_depto: depto,
+                descuento_aplicado: discountPct,
+                origen: 'hub_contrato',
+                timestamp: new Date().toISOString()
+              });
+              setContractNotice('✅ Reserva creada correctamente desde el contrato. Ya puedes revisarla en Centro de Reservas.', 'success');
+              showToast('Reserva creada desde contrato');
+              if (onReservationCreated) onReservationCreated();
+            } catch (err) {
+              console.error(err);
+              setContractNotice('Error al crear reserva: ' + err.message, 'error');
+              showToast('Error al crear reserva: ' + err.message, 'error');
+            }
+          };
+
           const generateContract = () => {
-            const salon = Number(contractData.salon) || 0; const depto = Number(contractData.depto) || 0; const discountPct = Number(contractData.discount) || 0; const deposit = Number(contractData.deposit) || 0;
-            const subtotal = salon + depto; const discountAmount = subtotal * (discountPct / 100); const total = subtotal - discountAmount; const balance = total - deposit;
+            const { salon, depto, discountPct, deposit, subtotal, discountAmount, total, balance } = calculateContractTotals();
             const today = new Date(); const todayStr = `${today.getDate()}/${today.getMonth()+1}/${today.getFullYear()}`;
             let dateFormatted = '[Fecha]'; if (contractData.date) { const parts = contractData.date.split('-'); dateFormatted = `${parts[2]}/${parts[1]}/${parts[0]}`; }
             let costBreakdown = "";
@@ -2182,11 +2260,19 @@
                   <div className="mb-6"><h3 className="font-black text-slate-800 text-xl">Generador de Contratos</h3></div>
                   <div className="space-y-4">
                     <input type="text" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" placeholder="Nombre Cliente" value={contractData.client} onChange={e=>setContractData({...contractData, client: e.target.value})}/>
+                    <div className="grid grid-cols-2 gap-4"><input type="tel" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" placeholder="Teléfono" value={contractData.phone} onChange={e=>setContractData({...contractData, phone: e.target.value})}/><input type="email" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" placeholder="Correo" value={contractData.email} onChange={e=>setContractData({...contractData, email: e.target.value})}/></div>
                     <div className="grid grid-cols-2 gap-4"><input type="date" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.date} onChange={e=>setContractData({...contractData, date: e.target.value})}/><input type="text" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" placeholder="Tipo (Ej. Cumpleaños)" value={contractData.type} onChange={e=>setContractData({...contractData, type: e.target.value})}/></div>
                     <div className="grid grid-cols-2 gap-4"><input type="time" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.startTime} onChange={e=>setContractData({...contractData, startTime: e.target.value})}/><input type="time" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.endTime} onChange={e=>setContractData({...contractData, endTime: e.target.value})}/></div>
                     <div className="grid grid-cols-2 gap-4"><input type="number" placeholder="Costo Salón" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.salon} onChange={e=>setContractData({...contractData, salon: e.target.value})}/><input type="number" placeholder="Costo Depto" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.depto} onChange={e=>setContractData({...contractData, depto: e.target.value})}/></div>
                     <div className="grid grid-cols-2 gap-4"><input type="number" placeholder="Descuento (%)" className="w-full p-2.5 border rounded-lg bg-blue-50 text-blue-700 font-bold text-sm" value={contractData.discount} onChange={e=>setContractData({...contractData, discount: e.target.value})}/><input type="number" placeholder="Anticipo Recibido" className="w-full p-2.5 border rounded-lg bg-emerald-50 text-emerald-700 font-bold text-sm" value={contractData.deposit} onChange={e=>setContractData({...contractData, deposit: e.target.value})}/></div>
                     <button onClick={generateContract} className="w-full bg-slate-900 text-white font-bold py-3.5 mt-2 rounded-xl hover:bg-slate-800">Generar Contrato</button>
+                    <button onClick={handleCreateReservationFromContract} className="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-xl hover:bg-emerald-700 shadow-md shadow-emerald-100 flex items-center justify-center gap-2"><i className="fa-solid fa-calendar-check"></i> Crear reserva desde contrato</button>
+                    {contractReservationNotice && (
+                      <div className={`rounded-xl border px-4 py-3 text-sm font-bold leading-relaxed ${contractReservationNotice.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+                        {contractReservationNotice.msg}
+                      </div>
+                    )}
+                    <p className="text-[10px] text-slate-400 font-bold leading-relaxed bg-slate-50 border border-slate-100 rounded-xl p-3">Este botón crea la reserva en Centro de Reservas usando la fecha del contrato. Si la fecha ya existe, no sobrescribe nada.</p>
                   </div>
                 </div>
                 <div className="space-y-6 h-full flex flex-col">
