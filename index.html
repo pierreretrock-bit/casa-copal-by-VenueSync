@@ -225,6 +225,9 @@
                   d._anticipo = Number(d.anticipo || d.enganche || d.deposito || d.Anticipo || 0);
                   
                   d._status = d.status || d.estado || d.Estado || 'Pendiente';
+                  const rawOrigin = String(d.origen || d.origin || d.fuente || '').trim();
+                  const rawStatusForOrigin = String(d.status || d.estado || d.estatus || '').trim().toLowerCase();
+                  d._origen = rawOrigin || (rawStatusForOrigin === 'apartado_esperando_pago' ? 'Web' : 'Hub');
                   if (d._precioTotal === 0) {
                       d._status = 'Liquidado'; 
                   } else if (d._anticipo >= d._precioTotal && d._precioTotal > 0) {
@@ -1063,6 +1066,16 @@
             return 'Pendiente';
           };
 
+          const getBookingOrigin = (booking) => {
+            const rawOrigin = String(booking._origen || booking.origen || booking.origin || booking.fuente || '').trim().toLowerCase();
+            const rawStatus = String(booking.status || booking.estado || booking.estatus || '').trim().toLowerCase();
+
+            if (rawOrigin === 'web' || rawOrigin === 'webcasacopal' || rawOrigin === 'pagina_web' || rawOrigin === 'pagina web') return 'Web';
+            if (rawStatus === 'apartado_esperando_pago') return 'Web';
+
+            return 'Hub';
+          };
+
           const filteredBookings = useMemo(() => {
             const term = bookingSearchTerm.trim().toLowerCase();
             return bookings.filter(b => {
@@ -1080,7 +1093,9 @@
                 b._status,
                 b.status,
                 b.estado,
+                b._origen,
                 b.origen,
+                getBookingOrigin(b),
                 b.depto_incluido ? 'depto departamento' : 'solo salon',
                 b._precioTotal,
                 b._anticipo
@@ -1106,7 +1121,7 @@
               b._anticipo || 0,
               b._status || '',
               b.depto_incluido ? 'Sí' : 'No',
-              b.origen || ''
+              getBookingOrigin(b)
             ]);
 
             const csvContent = [headers.join(','), ...csvData.map(row => row.join(','))].join('\n');
@@ -1367,7 +1382,8 @@
                         const total = b._precioTotal;
                         const anticipo = b._anticipo;
                         const saldo = total - anticipo;
-                        const status = b._status === 'Confirmada' ? 'Anticipado' : b._status; 
+                        const status = b._status === 'Confirmada' ? 'Anticipado' : b._status;
+                        const origin = getBookingOrigin(b);
                         
                         return (
                         <tr key={b.id} className={`hover:bg-slate-50/50 transition-colors ${b._fechaStr && b._fechaStr < new Date().toISOString().split('T')[0] ? 'opacity-60' : ''}`}>
@@ -1388,7 +1404,7 @@
                           <td className="p-6 align-top">
                             <span className="font-black text-slate-800 text-lg">{b._fechaStr || 'Sin Fecha'}</span>
                             <div className="mt-2">
-                              {b.origen === 'Web' ? 
+                              {origin === 'Web' ? 
                                 <span className="inline-block bg-purple-50 text-purple-700 border border-purple-100 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest"><i className="fa-solid fa-globe"></i> Web</span> : 
                                 <span className="inline-block bg-slate-50 text-slate-600 border border-slate-200 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest"><i className="fa-solid fa-mobile-screen"></i> Hub</span>
                               }
