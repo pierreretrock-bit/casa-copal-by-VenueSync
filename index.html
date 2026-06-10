@@ -37,7 +37,7 @@
         import { createRoot } from 'react-dom/client';
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
-        import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, getDoc, setDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+        import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, setDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
         import { LayoutDashboard, CalendarDays, WalletCards, Users, Megaphone, PlusCircle, LogOut, CheckCircle2, AlertCircle, TrendingUp, FileText, Copy, Smartphone, Download, UserCircle, Settings, Lock, Sparkles, Loader2, FileSpreadsheet } from 'lucide-react';
 
         // ============================================================================
@@ -118,9 +118,9 @@
         };
 
         const TEAM_PROFILES = {
-          'pierreretrock@gmail.com': { id: 'admin', name: 'Pierre', role: 'Administrador', canViewAll: true },
-          'faviolavizcarratirado@gmail.com': { id: 'fabiola', name: 'Fabiola', role: 'Finanzas', canViewAll: true },
-          'gpecamargo19@gmail.com': { id: 'lupita', name: 'Lupita', role: 'Capturista', canViewAll: false }
+          'pierreretrock@gmail.com': { id: 'admin', name: 'Pierre', role: 'Administrador', canViewAll: true, canViewBookings: true, canManageBookings: true, canViewBookingFinancials: true, canViewExpenses: true },
+          'faviolavizcarratirado@gmail.com': { id: 'fabiola', name: 'Fabiola', role: 'Finanzas', canViewAll: true, canViewBookings: true, canManageBookings: true, canViewBookingFinancials: true, canViewExpenses: true },
+          'gpecamargo19@gmail.com': { id: 'lupita', name: 'Lupita', role: 'Capturista', canViewAll: false, canViewBookings: true, canManageBookings: false, canViewBookingFinancials: false, canViewExpenses: true }
         };
 
         function CasaCopalAdmin() {
@@ -148,10 +148,11 @@
             const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
               setUser(currentUser);
               if (currentUser && currentUser.email) {
-                const profile = TEAM_PROFILES[currentUser.email] || { id: 'guest', name: 'Usuario Limitado', role: 'Invitado', canViewAll: false };
+                const profile = TEAM_PROFILES[currentUser.email] || { id: 'guest', name: 'Usuario Limitado', role: 'Invitado', canViewAll: false, canViewBookings: false, canManageBookings: false, canViewBookingFinancials: false, canViewExpenses: true };
                 setActiveProfile({ ...profile, email: currentUser.email });
-                if (!profile.canViewAll) setActiveTab('expenses');
-                else setActiveTab('dashboard');
+                if (profile.canViewAll) setActiveTab('dashboard');
+                else if (profile.canViewBookings) setActiveTab('bookings');
+                else setActiveTab('expenses');
               }
               setIsAuthChecking(false);
             });
@@ -222,27 +223,9 @@
                   d._telefonoStr = d.cliente_telefono || d.telefono || d.Telefono || d.phone || d.celular || '';
                   d._correoStr = d.cliente_correo || d.correo || d.email || d.Email || '';
                   d._precioTotal = Number(d.precio_total || d.total || d.precio || d.costo || d.costo_total || d.Total || 0);
-                  d._extras = Array.isArray(d.extras) ? d.extras.map((extra, idx) => {
-                      const cantidad = Number(extra.cantidad || extra.quantity || 1) || 1;
-                      const precioUnitario = Number(extra.precio_unitario || extra.unit_price || extra.precio || 0) || 0;
-                      const totalExtra = Number(extra.total || (cantidad * precioUnitario)) || 0;
-                      return {
-                          id: extra.id || `extra-${idx}-${Date.now()}`,
-                          concepto: extra.concepto || extra.description || extra.nombre || 'Extra',
-                          cantidad,
-                          precio_unitario: precioUnitario,
-                          total: totalExtra,
-                          nota: extra.nota || extra.notes || ''
-                      };
-                  }) : [];
-                  d._extrasTotal = Number(d.extras_total || d._extras.reduce((sum, extra) => sum + Number(extra.total || 0), 0)) || 0;
-                  d._baseEventTotal = Number(d.base_event_total ?? Math.max(0, d._precioTotal - d._extrasTotal)) || 0;
                   d._anticipo = Number(d.anticipo || d.enganche || d.deposito || d.Anticipo || 0);
                   
                   d._status = d.status || d.estado || d.Estado || 'Pendiente';
-                  const rawOrigin = String(d.origen || d.origin || d.fuente || '').trim();
-                  const rawStatusForOrigin = String(d.status || d.estado || d.estatus || '').trim().toLowerCase();
-                  d._origen = rawOrigin || (rawStatusForOrigin === 'apartado_esperando_pago' ? 'Web' : 'Hub');
                   if (d._precioTotal === 0) {
                       d._status = 'Liquidado'; 
                   } else if (d._anticipo >= d._precioTotal && d._precioTotal > 0) {
@@ -329,7 +312,6 @@
                   d._monto = Number(d.amount || d.monto || d.cantidad || d.Total || d.total || 0);
                   d._desc = d.description || d.descripcion || d.concepto || d.detalle || 'Sin descripción';
                   d._cat = d.category || d.categoria || d.tipo || 'General';
-                  d._provider = d.provider || d.proveedor || 'Sin proveedor';
                   d._status = d.status || d.estado || d.estatus || 'Pagado';
                   
                   return { id: doc.id, ...d };
@@ -532,13 +514,17 @@
 
                 <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
                   {activeProfile.canViewAll && (
-                    <>
-                      <NavItem icon={<LayoutDashboard/>} label="Dashboard" isActive={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }} />
-                      <NavItem icon={<CalendarDays/>} label="Centro de Reservas" isActive={activeTab === 'bookings'} onClick={() => { setActiveTab('bookings'); setIsMobileMenuOpen(false); }} badge={bookings.filter(b => b._status === 'Pendiente' || b._status === 'Anticipado').length} />
-                      <NavItem icon={<FileText/>} label="Cotizaciones" isActive={activeTab === 'quotes'} onClick={() => { setActiveTab('quotes'); setIsMobileMenuOpen(false); }} />
-                    </>
+                    <NavItem icon={<LayoutDashboard/>} label="Dashboard" isActive={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }} />
                   )}
-                  <NavItem icon={<WalletCards/>} label="Gastos Operativos" isActive={activeTab === 'expenses'} onClick={() => { setActiveTab('expenses'); setIsMobileMenuOpen(false); }} />
+                  {(activeProfile.canViewAll || activeProfile.canViewBookings) && (
+                    <NavItem icon={<CalendarDays/>} label="Centro de Reservas" isActive={activeTab === 'bookings'} onClick={() => { setActiveTab('bookings'); setIsMobileMenuOpen(false); }} badge={bookings.filter(b => b._status === 'Pendiente' || b._status === 'Anticipado').length} />
+                  )}
+                  {activeProfile.canViewAll && (
+                    <NavItem icon={<FileText/>} label="Cotizaciones" isActive={activeTab === 'quotes'} onClick={() => { setActiveTab('quotes'); setIsMobileMenuOpen(false); }} />
+                  )}
+                  {(activeProfile.canViewAll || activeProfile.canViewExpenses) && (
+                    <NavItem icon={<WalletCards/>} label="Gastos Operativos" isActive={activeTab === 'expenses'} onClick={() => { setActiveTab('expenses'); setIsMobileMenuOpen(false); }} />
+                  )}
                   
                   {activeProfile.canViewAll && (
                     <>
@@ -554,7 +540,7 @@
 
               <main className="flex-1 overflow-y-auto relative w-full">
                 {toast.show && (
-                  <div className={`fixed top-6 right-6 z-[200] px-6 py-3 rounded-xl shadow-lg flex items-center gap-3 text-white transform transition-all max-w-[calc(100vw-2rem)] ${toast.type === 'success' ? 'bg-emerald-600' : 'bg-rose-600'}`}>
+                  <div className={`absolute top-6 right-6 z-50 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3 text-white transform transition-all ${toast.type === 'success' ? 'bg-emerald-600' : 'bg-rose-600'}`}>
                     {toast.type === 'success' ? <CheckCircle2 className="w-5 h-5"/> : <AlertCircle className="w-5 h-5"/>}
                     <span className="font-semibold text-sm">{toast.msg}</span>
                   </div>
@@ -619,15 +605,15 @@
                     </div>
                   )}
 
-                  {activeTab === 'bookings' && activeProfile.canViewAll && <BookingsModule db={db} bookings={bookings} showToast={showToast} initialData={quoteToConvert} clearInitialData={() => setQuoteToConvert(null)} />}
+                  {activeTab === 'bookings' && (activeProfile.canViewAll || activeProfile.canViewBookings) && <BookingsModule db={db} bookings={bookings} showToast={showToast} initialData={quoteToConvert} clearInitialData={() => setQuoteToConvert(null)} activeProfile={activeProfile} />}
                   
                   {activeTab === 'quotes' && activeProfile.canViewAll && <QuotesModule db={db} quotes={quotes} showToast={showToast} onConvertToBooking={(q) => { setQuoteToConvert(q); setActiveTab('bookings'); }} />}
 
-                  {activeTab === 'expenses' && <ExpensesModule db={db} expenses={expenses} expenseCategories={expenseCategories} activeProfile={activeProfile} showToast={showToast} callGeminiAI={callGeminiAI} />}
+                  {activeTab === 'expenses' && (activeProfile.canViewAll || activeProfile.canViewExpenses) && <ExpensesModule db={db} expenses={expenses} expenseCategories={expenseCategories} activeProfile={activeProfile} showToast={showToast} callGeminiAI={callGeminiAI} />}
                   
                   {activeTab === 'clients' && activeProfile.canViewAll && <ClientsModule db={db} clients={clients} clientNotes={clientNotes} showToast={showToast} />}
                   
-                  {activeTab === 'marketing' && activeProfile.canViewAll && <MarketingHub db={db} bookings={bookings} handleCopyText={handleCopyText} showToast={showToast} callGeminiAI={callGeminiAI} onReservationCreated={() => setActiveTab('bookings')} />}
+                  {activeTab === 'marketing' && activeProfile.canViewAll && <MarketingHub handleCopyText={handleCopyText} showToast={showToast} callGeminiAI={callGeminiAI} />}
                 </div>
               </main>
             </div>
@@ -646,7 +632,7 @@
                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-8 gap-4">
                   <div>
                      <h3 className="text-xl font-black text-slate-800">Rendimiento Anual</h3>
-                     <p className="text-sm text-slate-500 font-medium">Comparativa mensual de ingresos, gastos, utilidad y margen.</p>
+                     <p className="text-sm text-slate-500 font-medium">Comparativa de ingresos y gastos por mes.</p>
                   </div>
                   <div className="flex gap-4 bg-slate-50 p-2 px-4 rounded-xl border border-slate-100">
                      <div className="flex items-center gap-2">
@@ -664,16 +650,12 @@
                   {data.map((d, i) => {
                     const ingresoPercent = Math.max((d.Ingresos / maxVal) * 100, 1);
                     const gastoPercent = Math.max((d.Gastos / maxVal) * 100, 1);
-                    const utilidad = d.Ingresos - d.Gastos;
-                    const margen = d.Ingresos > 0 ? ((utilidad / d.Ingresos) * 100) : 0;
                     
                     return (
                      <div key={i} className="flex-1 flex flex-col items-center gap-3 group relative h-full">
-                        <div className="opacity-0 group-hover:opacity-100 absolute -top-24 bg-slate-900 text-white text-[10px] font-bold p-2.5 rounded-xl pointer-events-none transition-opacity whitespace-nowrap z-10 shadow-xl border border-slate-700">
+                        <div className="opacity-0 group-hover:opacity-100 absolute -top-14 bg-slate-900 text-white text-[10px] font-bold p-2.5 rounded-xl pointer-events-none transition-opacity whitespace-nowrap z-10 shadow-xl border border-slate-700">
                            <div className="flex justify-between gap-4"><span className="text-emerald-400">Ingresos:</span> <span>${d.Ingresos.toLocaleString()}</span></div>
                            <div className="flex justify-between gap-4 mt-1"><span className="text-rose-400">Gastos:</span> <span>${d.Gastos.toLocaleString()}</span></div>
-                           <div className="flex justify-between gap-4 mt-1 border-t border-slate-700 pt-1"><span className={utilidad >= 0 ? "text-blue-400" : "text-orange-400"}>Utilidad:</span> <span>{utilidad < 0 ? '-' : ''}${Math.abs(utilidad).toLocaleString()}</span></div>
-                           <div className="flex justify-between gap-4 mt-1"><span className="text-slate-300">Margen:</span> <span>{d.Ingresos > 0 ? `${margen.toFixed(1)}%` : '0%'}</span></div>
                         </div>
                         
                         <div className="w-full flex justify-center items-end gap-0.5 sm:gap-1 h-full relative border-b-2 border-slate-100 pb-1">
@@ -1039,21 +1021,19 @@
           );
         }
 
-        function BookingsModule({ db, bookings, showToast, initialData, clearInitialData }) {
+        function BookingsModule({ db, bookings, showToast, initialData, clearInitialData, activeProfile }) {
+          const canManageBookings = activeProfile?.canManageBookings ?? activeProfile?.canViewAll;
+          const canViewBookingFinancials = activeProfile?.canViewBookingFinancials ?? activeProfile?.canViewAll;
           const [form, setForm] = useState({ date: '', name: '', phone: '', email: '', isWeekend: false, includesDepto: false, discount: 0, anticipo: '' });
           const [bookingToFree, setBookingToFree] = useState(null); 
           const [editingBooking, setEditingBooking] = useState(null); 
           const [bookingToLiquidate, setBookingToLiquidate] = useState(null);
-          const [bookingSearchTerm, setBookingSearchTerm] = useState('');
-          const [bookingStatusFilter, setBookingStatusFilter] = useState('Todos');
-          const [showBookingFormModal, setShowBookingFormModal] = useState(false);
           
           useEffect(() => {
-            if (initialData) {
+            if (initialData && canManageBookings) {
               const d = new Date(initialData.date + 'T12:00:00');
               const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
               setForm(prev => ({...prev, date: initialData.date, name: initialData.cliente_nombre, phone: initialData.cliente_telefono, email: initialData.cliente_correo || '', includesDepto: initialData.depto_incluido, discount: initialData.descuento_aplicado, isWeekend: isWknd}));
-              setShowBookingFormModal(true);
               showToast('Datos de cotización cargados en el formulario');
               clearInitialData();
             }
@@ -1066,115 +1046,24 @@
             return subtotal - (subtotal * ((form.discount || 0) / 100));
           }, [form.isWeekend, form.includesDepto, form.discount]);
 
-          const normalizeBookingExtras = (extras = []) => {
-            if (!Array.isArray(extras)) return [];
-            return extras.map((extra, idx) => {
-              const cantidad = Number(extra.cantidad || extra.quantity || 1) || 1;
-              const precioUnitario = Number(extra.precio_unitario || extra.unit_price || extra.precio || 0) || 0;
-              const total = Number(extra.total || (cantidad * precioUnitario)) || 0;
-              return {
-                id: extra.id || `extra-${idx}-${Date.now()}`,
-                concepto: extra.concepto || extra.description || extra.nombre || 'Extra',
-                cantidad,
-                precio_unitario: precioUnitario,
-                total,
-                nota: extra.nota || extra.notes || ''
-              };
-            }).filter(extra => extra.concepto || extra.total > 0);
-          };
-
-          const calculateExtrasTotal = (extras = []) => normalizeBookingExtras(extras).reduce((sum, extra) => sum + Number(extra.total || 0), 0);
-
-          const createEmptyExtra = () => ({ id: `extra-${Date.now()}`, concepto: 'Horas extra', cantidad: 1, precio_unitario: '', total: 0, nota: '' });
-
-          const recalculateExtra = (extra) => {
-            const cantidad = Number(extra.cantidad || 0);
-            const precioUnitario = Number(extra.precio_unitario || 0);
-            return { ...extra, total: cantidad * precioUnitario };
-          };
-
-          const normalizeBookingStatus = (booking) => {
-            const total = Number(booking._precioTotal || booking.precio_total || booking.total || 0);
-            const anticipo = Number(booking._anticipo || booking.anticipo || booking.enganche || booking.deposito || 0);
-            const rawStatus = String(booking._status || booking.status || booking.estado || booking.estatus || '').trim().toLowerCase();
-
-            if (total === 0) return 'Liquidado';
-            if (anticipo >= total && total > 0) return 'Liquidado';
-            if (anticipo > 0) return 'Anticipado';
-            if (rawStatus === 'liquidado' || rawStatus === 'pagado' || rawStatus === 'cortesía' || rawStatus === 'cortesia') return 'Liquidado';
-            if (rawStatus === 'anticipado' || rawStatus === 'confirmada' || rawStatus === 'confirmado') return 'Anticipado';
-
-            // Cualquier solicitud web, bloqueo interno o registro sin pago se considera pendiente para filtros.
-            return 'Pendiente';
-          };
-
-          const getBookingOrigin = (booking) => {
-            const rawOrigin = String(booking._origen || booking.origen || booking.origin || booking.fuente || '').trim().toLowerCase();
-            const rawStatus = String(booking.status || booking.estado || booking.estatus || '').trim().toLowerCase();
-
-            if (rawOrigin === 'web' || rawOrigin === 'webcasacopal' || rawOrigin === 'pagina_web' || rawOrigin === 'pagina web') return 'Web';
-            if (rawStatus === 'apartado_esperando_pago') return 'Web';
-
-            return 'Hub';
-          };
-
-          const filteredBookings = useMemo(() => {
-            const term = bookingSearchTerm.trim().toLowerCase();
-            return bookings.filter(b => {
-              const status = normalizeBookingStatus(b);
-              const matchesStatus = bookingStatusFilter === 'Todos' || status === bookingStatusFilter;
-              if (!matchesStatus) return false;
-              if (!term) return true;
-
-              const searchText = [
-                b._fechaStr,
-                b._nombreStr,
-                b._telefonoStr,
-                b._correoStr,
-                status,
-                b._status,
-                b.status,
-                b.estado,
-                b._origen,
-                b.origen,
-                getBookingOrigin(b),
-                b.depto_incluido ? 'depto departamento' : 'solo salon',
-                normalizeBookingExtras(b.extras || b._extras).map(extra => `${extra.concepto} ${extra.nota}`).join(' '),
-                b._precioTotal,
-                b._anticipo
-              ].join(' ').toLowerCase();
-
-              return searchText.includes(term);
-            });
-          }, [bookings, bookingSearchTerm, bookingStatusFilter]);
-
           const handleExportReservationsToCSV = () => {
             if (bookings.length === 0) {
               showToast('No hay reservas para exportar', 'error');
               return;
             }
 
-            const headers = ['Fecha', 'Cliente', 'Teléfono', 'Correo', 'Total Base', 'Extras', 'Total Evento', 'Anticipo', 'Estatus', 'Depto Incluido', 'Origen', 'Detalle Extras'];
-            const csvData = bookings.map(b => {
-              const extras = normalizeBookingExtras(b.extras || b._extras);
-              const extrasTotal = Number(b.extras_total || b._extrasTotal || calculateExtrasTotal(extras)) || 0;
-              const baseTotal = Number(b.base_event_total ?? b._baseEventTotal ?? Math.max(0, Number(b._precioTotal || 0) - extrasTotal)) || 0;
-              const extrasDetail = extras.map(extra => `${extra.concepto}: ${extra.cantidad} x $${Number(extra.precio_unitario || 0)} = $${Number(extra.total || 0)}`).join(' | ');
-              return [
-                b._fechaStr || '',
-                `"${b._nombreStr || ''}"`,
-                b._telefonoStr || '',
-                b._correoStr || '',
-                baseTotal,
-                extrasTotal,
-                b._precioTotal || 0,
-                b._anticipo || 0,
-                b._status || '',
-                b.depto_incluido ? 'Sí' : 'No',
-                getBookingOrigin(b),
-                `"${extrasDetail}"`
-              ];
-            });
+            const headers = ['Fecha', 'Cliente', 'Teléfono', 'Correo', 'Total', 'Anticipo', 'Estatus', 'Depto Incluido', 'Origen'];
+            const csvData = bookings.map(b => [
+              b._fechaStr || '',
+              `"${b._nombreStr || ''}"`,
+              b._telefonoStr || '',
+              b._correoStr || '',
+              b._precioTotal || 0,
+              b._anticipo || 0,
+              b._status || '',
+              b.depto_incluido ? 'Sí' : 'No',
+              b.origen || ''
+            ]);
 
             const csvContent = [headers.join(','), ...csvData.map(row => row.join(','))].join('\n');
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -1202,9 +1091,6 @@
               await setDoc(doc(db, 'reservaciones', form.date), { 
                 date: form.date, 
                 status: newStatus,
-                base_event_total: calculatedTotal,
-                extras: [],
-                extras_total: 0,
                 precio_total: calculatedTotal,
                 anticipo: anticipoNum,
                 depto_incluido: form.includesDepto,
@@ -1217,7 +1103,6 @@
               });
               showToast(anticipoNum > 0 ? 'Fecha reservada' : 'Fecha bloqueada');
               setForm({ date: '', name: '', phone: '', email: '', isWeekend: false, includesDepto: false, discount: 0, anticipo: '' });
-              setShowBookingFormModal(false);
             } catch(err) { console.error(err); showToast('Error al bloquear', 'error'); }
           };
 
@@ -1255,10 +1140,7 @@
             e.preventDefault();
             if (!editingBooking) return;
 
-            const extras = normalizeBookingExtras(editingBooking.extras || []);
-            const extrasTotal = calculateExtrasTotal(extras);
-            const baseTotal = Number(editingBooking.base_event_total || 0);
-            const total = baseTotal + extrasTotal;
+            const total = Number(editingBooking.precio_total);
             const anticipo = Number(editingBooking.anticipo);
             
             let newStatus = 'Pendiente';
@@ -1272,9 +1154,6 @@
                 cliente_telefono: editingBooking.cliente_telefono || '',
                 cliente_correo: editingBooking.cliente_correo || '',
                 date: editingBooking.date, 
-                base_event_total: baseTotal,
-                extras,
-                extras_total: extrasTotal,
                 precio_total: total,
                 anticipo: anticipo,
                 status: newStatus,
@@ -1296,34 +1175,8 @@
             const discount = Number(editingBooking.descuento_aplicado || 0);
             const deptoFinalPrice = deptoPrice - (deptoPrice * (discount / 100));
 
-            setEditingBooking(prev => {
-              const nextBaseTotal = Math.round(isChecked ? Number(prev.base_event_total || 0) + deptoFinalPrice : Number(prev.base_event_total || 0) - deptoFinalPrice);
-              const extrasTotal = calculateExtrasTotal(prev.extras || []);
-              return {
-                ...prev,
-                depto_incluido: isChecked,
-                base_event_total: nextBaseTotal,
-                precio_total: nextBaseTotal + extrasTotal
-              };
-            });
-          };
-
-          const handleAddExtraToEditingBooking = () => {
-            setEditingBooking(prev => ({ ...prev, extras: [...normalizeBookingExtras(prev.extras || []), createEmptyExtra()] }));
-          };
-
-          const handleRemoveExtraFromEditingBooking = (extraId) => {
-            setEditingBooking(prev => ({ ...prev, extras: normalizeBookingExtras(prev.extras || []).filter(extra => extra.id !== extraId) }));
-          };
-
-          const handleUpdateExtraInEditingBooking = (extraId, field, value) => {
             setEditingBooking(prev => ({
-              ...prev,
-              extras: normalizeBookingExtras(prev.extras || []).map(extra => {
-                if (extra.id !== extraId) return extra;
-                const updated = { ...extra, [field]: value };
-                return recalculateExtra(updated);
-              })
+              ...prev, depto_incluido: isChecked, precio_total: Math.round(isChecked ? Number(prev.precio_total) + deptoFinalPrice : Number(prev.precio_total) - deptoFinalPrice)
             }));
           };
 
@@ -1339,8 +1192,6 @@
             const anticipo = booking._anticipo || 0;
             const saldo = precio - anticipo;
             const incluyeDepto = booking.depto_incluido;
-            const extras = normalizeBookingExtras(booking.extras || booking._extras);
-            const extrasTotal = Number(booking.extras_total || booking._extrasTotal || calculateExtrasTotal(extras)) || 0;
             
             let fechaBonita = booking._fechaStr;
             if (booking._fechaStr && booking._fechaStr.includes('-')) {
@@ -1357,21 +1208,8 @@
             cuerpo += `Este correo es para confirmar formalmente que hemos recibido tu anticipo y tu reserva en Casa Copal está 100% segura.\n\n`;
             cuerpo += `🗓️ Fecha de tu evento: ${fechaBonita}\n`;
             
-            if (incluyeDepto === true) {
-                cuerpo += `🛏️ Espacios: Salón Principal + Departamento Privado\n`;
-            } else {
-                cuerpo += `🏠 Espacios: Únicamente Salón Principal\n`;
-            }
-
-            if (extrasTotal > 0 && extras.length > 0) {
-                cuerpo += `\n➕ Extras del evento:\n`;
-                extras.forEach(extra => {
-                    cuerpo += `• ${extra.concepto}: ${extra.cantidad} x $${Number(extra.precio_unitario || 0).toLocaleString()} = $${Number(extra.total || 0).toLocaleString()} MXN\n`;
-                });
-            }
-            
             if (precio !== undefined && precio !== null) {
-                cuerpo += `\n💵 Total Acordado: $${Number(precio).toLocaleString()} MXN\n`;
+                cuerpo += `💵 Total Acordado: $${Number(precio).toLocaleString()} MXN\n`;
                 cuerpo += `✅ Anticipo Recibido: $${Number(anticipo).toLocaleString()} MXN\n`;
                 
                 if (saldo > 0) {
@@ -1379,6 +1217,12 @@
                 } else {
                     cuerpo += `✨ Faltante por Cubrir: $0 MXN (Evento Liquidado)\n`;
                 }
+            }
+            
+            if (incluyeDepto === true) {
+                cuerpo += `🛏️ Espacios: Salón Principal + Departamento Privado\n`;
+            } else {
+                cuerpo += `🏠 Espacios: Únicamente Salón Principal\n`;
             }
             
             cuerpo += `\nNos da mucho gusto recibirte. Recuerda que el saldo pendiente se liquida máximo 1 día antes del evento.\n\n`;
@@ -1396,61 +1240,68 @@
                   <h2 className="text-3xl font-black text-slate-800">Centro de Reservas</h2>
                   <p className="text-slate-500">Unificación de Página Web y Bloqueos Manuales.</p>
                 </div>
-                <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
-                  <button onClick={() => setShowBookingFormModal(true)} className="bg-slate-900 hover:bg-emerald-600 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2">
-                    <PlusCircle className="w-4 h-4"/> Nueva reserva
-                  </button>
-                  <button onClick={handleExportReservationsToCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2">
+                {canViewBookingFinancials && (
+                  <button onClick={handleExportReservationsToCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center gap-2">
                     <FileSpreadsheet className="w-4 h-4"/> Descargar a Excel
                   </button>
-                </div>
+                )}
               </div>
 
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
-                <h3 className="font-black text-slate-800 flex items-center gap-2"><i className="fa-solid fa-calendar-plus text-emerald-600"></i> Captura de reservas</h3>
-                <p className="text-sm text-slate-500 font-medium mt-1">El formulario de agendar evento queda oculto para mantener limpia la pantalla. Usa el botón <strong>+ Nueva reserva</strong> de la parte superior cuando necesites bloquear una fecha.</p>
-              </div>
-
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
-                <div className="flex flex-col lg:flex-row gap-4 lg:items-end lg:justify-between">
-                  <div className="flex-1">
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5">Buscar reserva</label>
-                    <div className="relative">
-                      <i className="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-                      <input
-                        type="text"
-                        placeholder="Buscar por cliente, teléfono, correo, fecha, estado u origen..."
-                        className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-medium text-slate-700"
-                        value={bookingSearchTerm}
-                        onChange={e => setBookingSearchTerm(e.target.value)}
-                      />
+              {canManageBookings ? (
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><i className="fa-solid fa-lock text-emerald-600"></i> Agendar Evento y Anticipo</h3>
+                <form onSubmit={handleBlockDate} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-bold text-slate-500 mb-1">Nombre del Cliente</label>
+                      <input type="text" placeholder="Ej. Familia López" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required/>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1">Teléfono</label>
+                      <input type="tel" placeholder="Ej. 624..." className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1">Correo (Opcional)</label>
+                      <input type="email" placeholder="correo@..." className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
                     </div>
                   </div>
-                  <div className="w-full lg:w-56">
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5">Estado</label>
-                    <select
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700"
-                      value={bookingStatusFilter}
-                      onChange={e => setBookingStatusFilter(e.target.value)}
-                    >
-                      <option value="Todos">Todos</option>
-                      <option value="Pendiente">Pendiente</option>
-                      <option value="Anticipado">Anticipado</option>
-                      <option value="Liquidado">Liquidado</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center justify-between lg:justify-end gap-3">
-                    <div className="text-xs font-bold text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 whitespace-nowrap">
-                      Mostrando <span className="text-slate-900 font-black">{filteredBookings.length}</span> de <span className="text-slate-900 font-black">{bookings.length}</span>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 items-end">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1">Fecha</label>
+                      <input type="date" required className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.date} onChange={e => {
+                        const d = new Date(e.target.value + 'T12:00:00');
+                        const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+                        setForm({...form, date: e.target.value, isWeekend: isWknd});
+                      }} />
                     </div>
-                    {(bookingSearchTerm || bookingStatusFilter !== 'Todos') && (
-                      <button type="button" onClick={() => { setBookingSearchTerm(''); setBookingStatusFilter('Todos'); }} className="text-xs font-black text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-100 rounded-xl px-4 py-3 transition-colors whitespace-nowrap">
-                        Limpiar
+                    <div className="flex items-center justify-center h-[44px]">
+                      <label className="flex items-center gap-2 text-sm font-bold cursor-pointer text-slate-700 bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-lg w-full">
+                        <input type="checkbox" className="w-4 h-4 text-emerald-600 rounded" checked={form.includesDepto} onChange={e => setForm({...form, includesDepto: e.target.checked})} /> + Depto
+                      </label>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-blue-600 mb-1">Descuento (%)</label>
+                      <input type="number" min="0" max="100" placeholder="0" className="w-full p-2.5 bg-blue-50 border border-blue-200 text-blue-700 font-bold rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm" value={form.discount || ''} onChange={e => setForm({...form, discount: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-emerald-600 mb-1">Anticipo ($)</label>
+                      <input type="number" required placeholder="0" className="w-full p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.anticipo} onChange={e => setForm({...form, anticipo: e.target.value})} />
+                      <p className="text-[10px] text-slate-500 mt-1 font-bold absolute">Total: ${calculatedTotal.toLocaleString()}</p>
+                    </div>
+                    <div className="col-span-2 md:col-span-1">
+                      <button type="submit" className="bg-slate-900 text-white font-bold py-2.5 rounded-lg hover:bg-slate-800 transition-colors w-full flex items-center justify-center gap-2 shadow-md">
+                        <i className="fa-solid fa-save"></i> Guardar
                       </button>
-                    )}
+                    </div>
                   </div>
+                </form>
                 </div>
-              </div>
+              ) : (
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-blue-100 bg-blue-50">
+                  <h3 className="font-black text-blue-900 flex items-center gap-2"><i className="fa-solid fa-eye"></i> Vista de solo consulta</h3>
+                  <p className="text-sm text-blue-800 font-medium mt-1">Puedes revisar fechas, clientes y datos de contacto. Los montos, edición, aprobación, liquidación y liberación de fechas están ocultos para este perfil.</p>
+                </div>
+              )}
 
               <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
                 <div className="bg-white border-b border-slate-100 px-8 py-6 flex justify-between items-center">
@@ -1458,44 +1309,35 @@
                   <span className="text-xs text-slate-400 font-bold uppercase tracking-widest"><i className="fa-solid fa-arrow-down-1-9"></i> Orden cronológico</span>
                 </div>
                 <div className="overflow-x-auto pb-2">
-                  <table className="w-full text-left border-collapse min-w-[950px]">
+                  <table className={`w-full text-left border-collapse ${canViewBookingFinancials ? 'min-w-[950px]' : 'min-w-[760px]'}`}>
                     <thead>
                       <tr className="text-slate-400 text-xs font-bold uppercase tracking-widest border-b border-slate-100">
-                        <th className="p-6 font-bold w-12 text-center"></th>
+                        {canManageBookings && <th className="p-6 font-bold w-12 text-center"></th>}
                         <th className="p-6 font-bold w-32">Fecha</th>
                         <th className="p-6 font-bold">Cliente / Info</th>
                         <th className="p-6 font-bold text-center">Estado</th>
-                        <th className="p-6 font-bold w-48">Finanzas</th>
-                        <th className="p-6 font-bold text-right w-48">Acciones</th>
+                        {canViewBookingFinancials && <th className="p-6 font-bold w-48">Finanzas</th>}
+                        {canManageBookings && <th className="p-6 font-bold text-right w-48">Acciones</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {bookings.length === 0 ? (
-                        <tr><td colSpan="6" className="p-12 text-center text-slate-400 font-bold">Sin eventos en la base de datos</td></tr>
-                      ) : filteredBookings.length === 0 ? (
-                        <tr><td colSpan="6" className="p-12 text-center text-slate-400 font-bold">No hay reservas que coincidan con la búsqueda o filtro seleccionado</td></tr>
-                      ) : filteredBookings.map(b => {
+                        <tr><td colSpan={canViewBookingFinancials ? 6 : 3} className="p-12 text-center text-slate-400 font-bold">Sin eventos en la base de datos</td></tr>
+                      ) : bookings.map(b => {
                         const total = b._precioTotal;
                         const anticipo = b._anticipo;
                         const saldo = total - anticipo;
-                        const status = normalizeBookingStatus(b);
-                        const origin = getBookingOrigin(b);
-                        const extras = normalizeBookingExtras(b.extras || b._extras);
-                        const extrasTotal = Number(b.extras_total || b._extrasTotal || calculateExtrasTotal(extras)) || 0;
-                        const baseTotal = Number(b.base_event_total ?? b._baseEventTotal ?? Math.max(0, total - extrasTotal)) || 0;
+                        const status = b._status === 'Confirmada' ? 'Anticipado' : b._status; 
                         
                         return (
                         <tr key={b.id} className={`hover:bg-slate-50/50 transition-colors ${b._fechaStr && b._fechaStr < new Date().toISOString().split('T')[0] ? 'opacity-60' : ''}`}>
-                          <td className="p-6 align-top text-center">
-                            <button onClick={() => {
-                              const bookingExtras = normalizeBookingExtras(b.extras || b._extras);
-                              const bookingExtrasTotal = Number(b.extras_total || b._extrasTotal || calculateExtrasTotal(bookingExtras)) || 0;
-                              const bookingBaseTotal = Number(b.base_event_total ?? b._baseEventTotal ?? Math.max(0, b._precioTotal - bookingExtrasTotal)) || 0;
-                              setEditingBooking({...b, date: b._fechaStr, cliente_nombre: b._nombreStr, cliente_telefono: b._telefonoStr, cliente_correo: b._correoStr, base_event_total: bookingBaseTotal, extras: bookingExtras, extras_total: bookingExtrasTotal, precio_total: b._precioTotal, anticipo: b._anticipo});
-                            }} className="w-10 h-10 bg-slate-200 text-slate-700 hover:bg-emerald-100 hover:text-emerald-700 rounded-full transition-colors flex items-center justify-center shadow-md mx-auto" title="Editar Reserva">
-                              <i className="fa-solid fa-pen text-base"></i>
-                            </button>
-                          </td>
+                          {canManageBookings && (
+                            <td className="p-6 align-top text-center">
+                              <button onClick={() => setEditingBooking({...b, date: b._fechaStr, cliente_nombre: b._nombreStr, cliente_telefono: b._telefonoStr, cliente_correo: b._correoStr, precio_total: b._precioTotal, anticipo: b._anticipo})} className="w-10 h-10 bg-slate-200 text-slate-700 hover:bg-emerald-100 hover:text-emerald-700 rounded-full transition-colors flex items-center justify-center shadow-md mx-auto" title="Editar Reserva">
+                                <i className="fa-solid fa-pen text-base"></i>
+                              </button>
+                            </td>
+                          )}
                           <td className="p-6 align-top text-center">
                             {status === 'Liquidado' ? (
                               <span className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-widest block"><i className="fa-solid fa-check-double mr-1"></i> {b._precioTotal === 0 ? 'Cortesía' : 'Liquidado'}</span>
@@ -1508,7 +1350,7 @@
                           <td className="p-6 align-top">
                             <span className="font-black text-slate-800 text-lg">{b._fechaStr || 'Sin Fecha'}</span>
                             <div className="mt-2">
-                              {origin === 'Web' ? 
+                              {b.origen === 'Web' ? 
                                 <span className="inline-block bg-purple-50 text-purple-700 border border-purple-100 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest"><i className="fa-solid fa-globe"></i> Web</span> : 
                                 <span className="inline-block bg-slate-50 text-slate-600 border border-slate-200 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest"><i className="fa-solid fa-mobile-screen"></i> Hub</span>
                               }
@@ -1523,47 +1365,41 @@
                               {b._correoStr && (
                                 <span className="inline-flex items-center gap-1.5 text-[10px] text-slate-500 font-medium"><i className="fa-regular fa-envelope text-slate-400"></i> {b._correoStr}</span>
                               )}
-                              {b._correoStr && (
+                              {canManageBookings && b._correoStr && (
                                 <button onClick={() => handleSendEmail(b)} className="mt-1 inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-sm transition-colors w-fit" title="Enviar Confirmación por Correo">
                                   <i className="fa-solid fa-paper-plane text-blue-500"></i> Enviar Recibo
                                 </button>
                               )}
                             </div>
                           </td>
-                          <td className="p-6 align-top">
-                            <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 relative">
-                              <div className="flex justify-between items-start mb-1 gap-2">
-                                <p className="text-xs text-slate-500 font-medium">Total: <strong className="text-slate-800">${total.toLocaleString()}</strong></p>
-                                <div className="shrink-0">{b.depto_incluido ? <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest shadow-sm whitespace-nowrap">+ Depto</span> : <span className="bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest shadow-sm whitespace-nowrap">Solo Salón</span>}</div>
-                              </div>
-                              {extrasTotal > 0 && (
-                                <div className="border-t border-slate-200 pt-1 mt-1 mb-1">
-                                  <p className="text-[10px] text-slate-500 font-bold">Base: <strong className="text-slate-700">${baseTotal.toLocaleString()}</strong></p>
-                                  <p className="text-[10px] text-blue-600 font-bold">Extras: <strong>${extrasTotal.toLocaleString()}</strong></p>
-                                  <div className="mt-1 space-y-0.5">
-                                    {extras.slice(0, 2).map(extra => <p key={extra.id} className="text-[9px] text-slate-500 truncate">+ {extra.concepto}: ${Number(extra.total || 0).toLocaleString()}</p>)}
-                                    {extras.length > 2 && <p className="text-[9px] text-slate-400">+ {extras.length - 2} extra(s) más</p>}
-                                  </div>
+                          {canViewBookingFinancials && (
+                            <td className="p-6 align-top">
+                              <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 relative">
+                                <div className="flex justify-between items-start mb-1 gap-2">
+                                  <p className="text-xs text-slate-500 font-medium">Total: <strong className="text-slate-800">${total.toLocaleString()}</strong></p>
+                                  <div className="shrink-0">{b.depto_incluido ? <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest shadow-sm whitespace-nowrap">+ Depto</span> : <span className="bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest shadow-sm whitespace-nowrap">Solo Salón</span>}</div>
                                 </div>
-                              )}
-                              <p className="text-xs text-slate-500 font-medium mb-1">Anticipo: <strong className="text-emerald-600">${anticipo.toLocaleString()}</strong></p>
-                              {status !== 'Liquidado' && <p className="text-xs text-rose-500 font-bold border-t border-slate-200 pt-1 mt-1">Saldo: ${saldo.toLocaleString()}</p>}
-                            </div>
-                          </td>
-                          <td className="p-6 align-top text-right">
-                            <div className="flex flex-col items-end gap-2">
-                              {status === 'Liquidado' ? (
-                                <span className="text-[10px] text-slate-400 font-bold"><i className="fa-solid fa-lock"></i> Pago Completo</span>
-                              ) : status === 'Anticipado' ? (
-                                <button onClick={() => setBookingToLiquidate(b)} className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-full hover:bg-emerald-700 transition-colors shadow-md flex items-center gap-1.5"><i className="fa-solid fa-hand-holding-dollar"></i> Liquidar Saldo</button>
-                              ) : (
-                                <button onClick={() => handleApproveWebBooking(b.id)} className="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-full hover:bg-emerald-600 transition-colors shadow-md flex items-center gap-1.5"><i className="fa-solid fa-check"></i> Aprobar</button>
-                              )}
-                              {(status === 'Anticipado' || status === 'Pendiente') && (
-                                <button onClick={() => setBookingToFree(b)} className="text-[10px] text-rose-400 hover:text-rose-600 font-bold hover:underline transition-colors mt-2">Liberar Fecha</button>
-                              )}
-                            </div>
-                          </td>
+                                <p className="text-xs text-slate-500 font-medium mb-1">Anticipo: <strong className="text-emerald-600">${anticipo.toLocaleString()}</strong></p>
+                                {status !== 'Liquidado' && <p className="text-xs text-rose-500 font-bold border-t border-slate-200 pt-1 mt-1">Saldo: ${saldo.toLocaleString()}</p>}
+                              </div>
+                            </td>
+                          )}
+                          {canManageBookings && (
+                            <td className="p-6 align-top text-right">
+                              <div className="flex flex-col items-end gap-2">
+                                {status === 'Liquidado' ? (
+                                  <span className="text-[10px] text-slate-400 font-bold"><i className="fa-solid fa-lock"></i> Pago Completo</span>
+                                ) : status === 'Anticipado' ? (
+                                  <button onClick={() => setBookingToLiquidate(b)} className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-full hover:bg-emerald-700 transition-colors shadow-md flex items-center gap-1.5"><i className="fa-solid fa-hand-holding-dollar"></i> Liquidar Saldo</button>
+                                ) : (
+                                  <button onClick={() => handleApproveWebBooking(b.id)} className="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-full hover:bg-emerald-600 transition-colors shadow-md flex items-center gap-1.5"><i className="fa-solid fa-check"></i> Aprobar</button>
+                                )}
+                                {(status === 'Anticipado' || status === 'Pendiente') && (
+                                  <button onClick={() => setBookingToFree(b)} className="text-[10px] text-rose-400 hover:text-rose-600 font-bold hover:underline transition-colors mt-2">Liberar Fecha</button>
+                                )}
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       )})}
                     </tbody>
@@ -1571,82 +1407,10 @@
                 </div>
               </div>
 
-              {showBookingFormModal && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden">
-                    <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center">
-                      <div>
-                        <h3 className="font-black text-xl text-slate-800 flex items-center gap-2"><i className="fa-solid fa-lock text-emerald-600"></i> Nueva reserva / bloqueo</h3>
-                        <p className="text-xs text-slate-500 mt-1 font-bold">Agendar evento, registrar anticipo y bloquear fecha.</p>
-                      </div>
-                      <button type="button" onClick={() => setShowBookingFormModal(false)} className="w-8 h-8 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"><i className="fa-solid fa-xmark"></i></button>
-                    </div>
-                    <form onSubmit={handleBlockDate} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Nombre del Cliente</label>
-                        <input type="text" placeholder="Ej. Familia López" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required/>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Teléfono</label>
-                          <input type="tel" placeholder="Ej. 624..." className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Correo (Opcional)</label>
-                          <input type="email" placeholder="correo@..." className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Fecha</label>
-                          <input type="date" required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700" value={form.date} onChange={e => {
-                            const d = new Date(e.target.value + 'T12:00:00');
-                            const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-                            setForm({...form, date: e.target.value, isWeekend: isWknd});
-                          }} />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1.5">Descuento (%)</label>
-                          <input type="number" min="0" max="100" placeholder="0" className="w-full p-3 bg-blue-50 border border-blue-200 text-blue-700 font-black rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm" value={form.discount || ''} onChange={e => setForm({...form, discount: e.target.value})} />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <label className="flex items-center gap-3 text-sm font-bold cursor-pointer text-slate-700 bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl w-full">
-                          <input type="checkbox" className="w-4 h-4 text-emerald-600 rounded" checked={form.includesDepto} onChange={e => setForm({...form, includesDepto: e.target.checked})} />
-                          <span>Incluye Departamento</span>
-                        </label>
-                        <div>
-                          <label className="block text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1.5">Anticipo ($)</label>
-                          <input type="number" required placeholder="0" className="w-full p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 font-black rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.anticipo} onChange={e => setForm({...form, anticipo: e.target.value})} />
-                        </div>
-                      </div>
-
-                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-center justify-between">
-                        <div>
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total calculado</p>
-                          <p className="text-sm text-slate-500 font-medium">Según día, departamento y descuento.</p>
-                        </div>
-                        <p className="text-2xl font-black text-emerald-600">${calculatedTotal.toLocaleString()}</p>
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                        <button type="button" onClick={() => setShowBookingFormModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 rounded-xl transition-colors">Cancelar</button>
-                        <button type="submit" className="flex-1 bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-emerald-600 transition-colors shadow-lg flex items-center justify-center gap-2">
-                          <i className="fa-solid fa-save"></i> Guardar reserva
-                        </button>
-                      </div>
-                    </form>
-                  </div>
-                </div>
-              )}
-
               {/* Modales Reserva */}
               {editingBooking && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] overflow-y-auto">
+                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden">
                     <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center">
                       <div><h3 className="font-black text-xl text-slate-800">Editar Reserva</h3><p className="text-xs text-slate-500 mt-1 font-bold">Fecha: {editingBooking.date || 'Sin asignar'}</p></div>
                       <button onClick={() => setEditingBooking(null)} className="w-8 h-8 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"><i className="fa-solid fa-xmark"></i></button>
@@ -1657,45 +1421,11 @@
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Teléfono</label><input type="tel" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={editingBooking.cliente_telefono} onChange={e => setEditingBooking({...editingBooking, cliente_telefono: e.target.value})} /></div>
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Correo (Opcional)</label><input type="email" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={editingBooking.cliente_correo || ''} onChange={e => setEditingBooking({...editingBooking, cliente_correo: e.target.value})} /></div>
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Total base ($)</label><input type="number" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-black text-slate-800" value={editingBooking.base_event_total || 0} onChange={e => { const base = Number(e.target.value) || 0; const extrasTotal = calculateExtrasTotal(editingBooking.extras || []); setEditingBooking({...editingBooking, base_event_total: e.target.value, precio_total: base + extrasTotal}); }} required/></div>
-                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Extras ($)</label><input type="text" readOnly className="w-full p-3 bg-blue-50 border border-blue-100 rounded-xl outline-none font-black text-blue-700" value={`$${calculateExtrasTotal(editingBooking.extras || []).toLocaleString()}`} /></div>
-                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Total evento ($)</label><input type="text" readOnly className="w-full p-3 bg-emerald-50 border border-emerald-100 rounded-xl outline-none font-black text-emerald-700" value={`$${(Number(editingBooking.base_event_total || 0) + calculateExtrasTotal(editingBooking.extras || [])).toLocaleString()}`} /></div>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Importe Total ($)</label><input type="number" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-black text-slate-800" value={editingBooking.precio_total} onChange={e => setEditingBooking({...editingBooking, precio_total: e.target.value})} required/></div>
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Anticipo ($)</label><input type="number" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-black text-emerald-600" value={editingBooking.anticipo || 0} onChange={e => setEditingBooking({...editingBooking, anticipo: e.target.value})} required/></div>
-                        <div className="flex items-end"><label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 w-full"><input type="checkbox" className="w-4 h-4 text-emerald-600 rounded" checked={editingBooking.depto_incluido || false} onChange={handleEditDeptoToggle} /> Incluye Departamento</label></div>
                       </div>
-
-                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
-                        <div className="flex justify-between items-center gap-3">
-                          <div>
-                            <h4 className="font-black text-slate-800 text-sm">Extras del evento</h4>
-                            <p className="text-[10px] text-slate-500 font-bold">Ej. horas extra, brincolín, limpieza adicional u otro cobro.</p>
-                          </div>
-                          <button type="button" onClick={handleAddExtraToEditingBooking} className="bg-blue-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-blue-700 transition-colors">+ Agregar extra</button>
-                        </div>
-
-                        {normalizeBookingExtras(editingBooking.extras || []).length === 0 ? (
-                          <p className="text-xs text-slate-400 font-bold text-center py-3 bg-white rounded-xl border border-dashed border-slate-200">Sin extras registrados</p>
-                        ) : (
-                          <div className="space-y-3">
-                            {normalizeBookingExtras(editingBooking.extras || []).map(extra => (
-                              <div key={extra.id} className="bg-white border border-slate-200 rounded-xl p-3 space-y-3">
-                                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                                  <div className="md:col-span-4"><label className="block text-[9px] font-black text-slate-400 uppercase mb-1">Concepto</label><select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold" value={extra.concepto} onChange={e => handleUpdateExtraInEditingBooking(extra.id, 'concepto', e.target.value)}><option value="Horas extra">Horas extra</option><option value="Brincolín">Brincolín</option><option value="Limpieza adicional">Limpieza adicional</option><option value="Departamento agregado">Departamento agregado</option><option value="Otro">Otro</option></select></div>
-                                  <div className="md:col-span-2"><label className="block text-[9px] font-black text-slate-400 uppercase mb-1">Cantidad</label><input type="number" min="0" step="0.5" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm" value={extra.cantidad} onChange={e => handleUpdateExtraInEditingBooking(extra.id, 'cantidad', e.target.value)} /></div>
-                                  <div className="md:col-span-2"><label className="block text-[9px] font-black text-slate-400 uppercase mb-1">P. unitario</label><input type="number" min="0" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm" value={extra.precio_unitario} onChange={e => handleUpdateExtraInEditingBooking(extra.id, 'precio_unitario', e.target.value)} /></div>
-                                  <div className="md:col-span-3"><label className="block text-[9px] font-black text-slate-400 uppercase mb-1">Total</label><input type="text" readOnly className="w-full p-2.5 bg-blue-50 border border-blue-100 rounded-lg text-sm font-black text-blue-700" value={`$${Number(extra.total || 0).toLocaleString()}`} /></div>
-                                  <div className="md:col-span-1"><button type="button" onClick={() => handleRemoveExtraFromEditingBooking(extra.id)} className="w-full p-2.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg"><i className="fa-solid fa-trash"></i></button></div>
-                                </div>
-                                <input type="text" placeholder="Nota opcional del extra" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs" value={extra.nota || ''} onChange={e => handleUpdateExtraInEditingBooking(extra.id, 'nota', e.target.value)} />
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
+                      <div className="flex items-center gap-2"><label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer"><input type="checkbox" className="w-4 h-4 text-emerald-600 rounded" checked={editingBooking.depto_incluido || false} onChange={handleEditDeptoToggle} /> Incluye Departamento</label></div>
                       <button type="submit" className="w-full bg-slate-900 text-white font-bold py-3.5 rounded-xl mt-4 hover:bg-emerald-600 transition-colors shadow-lg flex justify-center items-center gap-2">Guardar Cambios</button>
                     </form>
                   </div>
@@ -1719,101 +1449,24 @@
                   </div>
                 </div>
               )}
-              <button
-                type="button"
-                onClick={() => setShowBookingFormModal(true)}
-                className="md:hidden fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-emerald-600 text-white shadow-2xl flex items-center justify-center hover:bg-emerald-700 transition-colors"
-                title="Nueva reserva"
-              >
-                <PlusCircle className="w-7 h-7"/>
-              </button>
-
             </div>
           );
         }
 
         function ExpensesModule({ db, expenses, expenseCategories, activeProfile, showToast, callGeminiAI }) {
-          const emptyExpenseForm = () => ({
-            date: new Date().toISOString().split('T')[0],
-            category: expenseCategories[0]?.name || '',
-            provider: '',
-            amount: '',
-            description: '',
-            status: 'Pagado',
-            notes: ''
-          });
-
-          const [form, setForm] = useState(emptyExpenseForm());
+          const [form, setForm] = useState({ date: new Date().toISOString().split('T')[0], category: '', amount: '', description: '', status: 'Pagado', notes: '' });
           const [editingExpense, setEditingExpense] = useState(null);
           const [showCatModal, setShowCatModal] = useState(false);
           const [newCatName, setNewCatName] = useState('');
           const [aiPrompt, setAiPrompt] = useState('');
           const [isAiLoading, setIsAiLoading] = useState(false);
-          const [showExpenseFormModal, setShowExpenseFormModal] = useState(false);
-          const [expenseFilters, setExpenseFilters] = useState({ search: '', category: 'Todas', status: 'Todos' });
 
-          useEffect(() => {
-            if (expenseCategories.length > 0 && !form.category) {
-              setForm(f => ({ ...f, category: expenseCategories[0].name }));
-            }
-          }, [expenseCategories]);
-
-          const filteredExpenses = useMemo(() => {
-            const search = expenseFilters.search.trim().toLowerCase();
-            return expenses.filter(e => {
-              const matchesSearch = !search || [
-                e._desc,
-                e._cat,
-                e._provider,
-                e._status,
-                e.notes,
-                e.recordedBy,
-                e._fechaStr
-              ].some(value => String(value || '').toLowerCase().includes(search));
-
-              const matchesCategory = expenseFilters.category === 'Todas' || e._cat === expenseFilters.category;
-              const matchesStatus = expenseFilters.status === 'Todos' || e._status === expenseFilters.status;
-
-              return matchesSearch && matchesCategory && matchesStatus;
-            });
-          }, [expenses, expenseFilters]);
-
-          const totalFilteredExpenses = useMemo(() => {
-            return filteredExpenses
-              .filter(e => e._status === 'Pagado' || !e._status)
-              .reduce((sum, e) => sum + Number(e._monto || 0), 0);
-          }, [filteredExpenses]);
-
-          const totalDebtExpenses = useMemo(() => {
-            return filteredExpenses
-              .filter(e => e._status === 'Adeudo')
-              .reduce((sum, e) => sum + Number(e._monto || 0), 0);
-          }, [filteredExpenses]);
-
-          const expensesByCategory = useMemo(() => {
-            const grouped = {};
-            filteredExpenses
-              .filter(e => e._status === 'Pagado' || !e._status)
-              .forEach(e => {
-                const cat = e._cat || 'General';
-                grouped[cat] = (grouped[cat] || 0) + Number(e._monto || 0);
-              });
-            return Object.entries(grouped)
-              .map(([category, total]) => ({ category, total }))
-              .sort((a, b) => b.total - a.total)
-              .slice(0, 8);
-          }, [filteredExpenses]);
-
-          const maxCategoryExpense = useMemo(() => {
-            return Math.max(...expensesByCategory.map(item => item.total), 1);
-          }, [expensesByCategory]);
-
-          const chartColors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#f97316', '#64748b'];
+          useEffect(() => { if (expenseCategories.length > 0 && !form.category) setForm(f => ({ ...f, category: expenseCategories[0].name })); }, [expenseCategories]);
 
           const handleExportExpensesToCSV = () => {
-            if (filteredExpenses.length === 0) return showToast('No hay gastos para exportar', 'error');
-            const csvContent = ['Fecha,Proveedor,Descripción,Categoría,Estado,Monto,Registrado Por,Observaciones'].concat(
-              filteredExpenses.map(e => `${e._fechaStr},"${e._provider || ''}","${e._desc}",${e._cat},${e._status},${e._monto},"${e.recordedBy||''}","${e.notes||''}"`)
+            if (expenses.length === 0) return showToast('No hay gastos para exportar', 'error');
+            const csvContent = ['Fecha,Descripción,Categoría,Estado,Monto,Registrado Por,Observaciones'].concat(
+              expenses.map(e => `${e._fechaStr},"${e._desc}",${e._cat},${e._status},${e._monto},"${e.recordedBy||''}","${e.notes||''}"`)
             ).join('\n');
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
@@ -1827,46 +1480,20 @@
             e.preventDefault();
             try {
               if (editingExpense) {
-                await updateDoc(doc(db, 'gastos', editingExpense.id), {
-                  date: editingExpense.date,
-                  category: editingExpense.category,
-                  provider: editingExpense.provider || '',
-                  amount: Number(editingExpense.amount),
-                  description: editingExpense.description,
-                  status: editingExpense.status,
-                  notes: editingExpense.notes || ''
-                });
-                showToast('Gasto actualizado');
-                setEditingExpense(null);
+                await updateDoc(doc(db, 'gastos', editingExpense.id), { date: editingExpense.date, category: editingExpense.category, amount: Number(editingExpense.amount), description: editingExpense.description, status: editingExpense.status, notes: editingExpense.notes || '' });
+                showToast('Gasto actualizado'); setEditingExpense(null);
               } else {
-                await addDoc(collection(db, 'gastos'), {
-                  ...form,
-                  category: form.category || (expenseCategories[0]?.name || 'General'),
-                  provider: form.provider || '',
-                  amount: Number(form.amount),
-                  recordedBy: activeProfile.name,
-                  timestamp: Date.now()
-                });
+                await addDoc(collection(db, 'gastos'), { ...form, category: form.category || (expenseCategories[0]?.name || 'General'), amount: Number(form.amount), recordedBy: activeProfile.name, timestamp: Date.now() });
                 showToast('Gasto registrado');
               }
-              setForm(emptyExpenseForm());
-              setShowExpenseFormModal(false);
+              setForm({ date: new Date().toISOString().split('T')[0], category: expenseCategories[0]?.name || '', amount: '', description: '', status: 'Pagado', notes: '' });
               setAiPrompt('');
             } catch(err) { showToast('Error al guardar: ' + err.message, 'error'); }
           };
 
           const handleEdit = (expense) => {
             try {
-              setEditingExpense({
-                id: expense.id,
-                date: expense._fechaStr || expense.date || new Date().toISOString().split('T')[0],
-                category: expense._cat || expense.category || '',
-                provider: expense._provider || expense.provider || '',
-                amount: String(expense._monto ?? expense.amount ?? 0),
-                description: expense._desc || expense.description || '',
-                status: expense._status || expense.status || 'Pagado',
-                notes: expense.notes || ''
-              });
+              setEditingExpense({ id: expense.id, date: expense._fechaStr || expense.date || new Date().toISOString().split('T')[0], category: expense._cat || expense.category || '', amount: String(expense._monto ?? expense.amount ?? 0), description: expense._desc || expense.description || '', status: expense._status || expense.status || 'Pagado', notes: expense.notes || '' });
             } catch (err) { showToast("No se pudo abrir el gasto para edición", "error"); }
           };
 
@@ -1879,190 +1506,53 @@
               setIsAiLoading(true);
               try {
                   const catList = expenseCategories.map(c => c.name).join(', ');
-                  const result = await callGeminiAI(`Analiza este texto de un gasto de un salón de eventos y extrae los datos en formato JSON estricto con las claves: "monto" (solo números), "descripcion" (texto breve capitalizado), "proveedor" (nombre del negocio o persona a quien se pagó) y "categoria" (debes elegir exactamente UNA de esta lista: ${catList}. Si ninguna cuadra usa "General"). Texto: "${aiPrompt}"`, true);
-                  if(result && result.monto) {
-                    setForm(p => ({
-                      ...p,
-                      amount: result.monto.toString(),
-                      description: result.descripcion || p.description,
-                      provider: result.proveedor || p.provider,
-                      category: result.categoria || p.category
-                    }));
-                    setShowExpenseFormModal(true);
-                    showToast('✨ Formulario autocompletado');
-                  }
+                  const result = await callGeminiAI(`Analiza este texto de un gasto de un salón de eventos y extrae los datos en formato JSON estricto con las claves: "monto" (solo números), "descripcion" (texto breve capitalizado), y "categoria" (debes elegir exactamente UNA de esta lista: ${catList}. Si ninguna cuadra usa "General"). Texto: "${aiPrompt}"`, true);
+                  if(result && result.monto) { setForm(p => ({...p, amount: result.monto.toString(), description: result.descripcion || p.description, category: result.categoria || p.category})); showToast('✨ Formulario autocompletado'); }
               } catch (err) { showToast('IA: ' + (err.message || 'Error desconocido'), 'error'); } finally { setIsAiLoading(false); }
           };
 
           return (
             <div className="animate-fade-in space-y-6 relative">
-              <div className="flex flex-col md:flex-row justify-between md:items-end gap-4">
-                <div>
-                  <h2 className="text-3xl font-black text-slate-800">Gastos Operativos</h2>
-                  <p className="text-slate-500 font-medium">Solo los gastos <span className="text-emerald-600 font-bold">Pagados</span> se restarán de tus utilidades.</p>
-                </div>
-                <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-                  <button type="button" onClick={() => setShowExpenseFormModal(true)} className="bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold py-2.5 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 w-full sm:w-fit"><PlusCircle className="w-4 h-4"/> Nuevo gasto</button>
-                  <button onClick={handleExportExpensesToCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2.5 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 w-full sm:w-fit"><FileSpreadsheet className="w-4 h-4"/> Descargar a Excel</button>
-                </div>
+              <div className="flex justify-between items-end">
+                <div><h2 className="text-3xl font-black text-slate-800">Gastos Operativos</h2><p className="text-slate-500 font-medium">Solo los gastos <span className="text-emerald-600 font-bold">Pagados</span> se restarán de tus utilidades.</p></div>
+                <button onClick={handleExportExpensesToCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center gap-2"><FileSpreadsheet className="w-4 h-4"/> Descargar a Excel</button>
               </div>
-
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <div className="flex flex-col md:flex-row justify-between md:items-end gap-3 mb-5">
-                  <div>
-                    <h3 className="font-black text-slate-800 text-lg">Gastos pagados por categoría</h3>
-                    <p className="text-xs text-slate-500 font-medium">Gráfica calculada con los filtros activos. Pasa el mouse sobre una barra para ver el monto.</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest">
-                    <span className="bg-slate-100 text-slate-500 px-3 py-1.5 rounded-full border border-slate-200">{filteredExpenses.length} registros</span>
-                    <span className="bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full border border-amber-100">Adeudos filtrados disponibles</span>
-                  </div>
-                </div>
-
-                {expensesByCategory.length === 0 ? (
-                  <div className="bg-slate-50 border border-dashed border-slate-200 rounded-2xl p-8 text-center">
-                    <p className="text-sm font-bold text-slate-400">No hay gastos pagados para graficar con estos filtros.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {expensesByCategory.map((item, index) => {
-                      const percent = Math.max((item.total / maxCategoryExpense) * 100, 6);
-                      const color = chartColors[index % chartColors.length];
-                      return (
-                        <div key={item.category} className="group relative">
-                          <div className="flex justify-between items-center mb-1.5 gap-3">
-                            <p className="text-xs font-black uppercase tracking-widest text-slate-600 truncate">{item.category}</p>
-                            <p className="text-[10px] font-bold text-slate-400 md:hidden">Toca la barra</p>
-                          </div>
-                          <div className="h-9 bg-slate-100 rounded-full overflow-visible border border-slate-200 relative shadow-inner">
-                            <div
-                              className="h-full rounded-full transition-all duration-300 group-hover:brightness-95 shadow-sm flex items-center justify-end pr-3"
-                              style={{ width: `${percent}%`, backgroundColor: color }}
-                            >
-                              <span className="text-white text-[10px] font-black uppercase tracking-widest hidden sm:inline">{Math.round(percent)}%</span>
-                            </div>
-                            <div className="pointer-events-none absolute right-2 -top-12 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity bg-slate-900 text-white text-xs font-black px-3 py-2 rounded-xl shadow-xl z-20 whitespace-nowrap">
-                              {item.category}: ${item.total.toLocaleString('es-MX')}
-                              <div className="absolute left-1/2 -bottom-1 w-2 h-2 bg-slate-900 rotate-45"></div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <h3 className="font-black text-slate-800 mb-4">Filtros de búsqueda</h3>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="md:col-span-2">
-                    <label className="block text-xs font-bold text-slate-500 mb-1">Buscar</label>
-                    <input type="text" placeholder="Ej. limpieza, Walmart, agua, factura..." className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={expenseFilters.search} onChange={e=>setExpenseFilters({...expenseFilters, search: e.target.value})}/>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">Categoría</label>
-                    <select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={expenseFilters.category} onChange={e=>setExpenseFilters({...expenseFilters, category: e.target.value})}>
-                      <option value="Todas">Todas</option>
-                      {expenseCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">Estado</label>
-                    <select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={expenseFilters.status} onChange={e=>setExpenseFilters({...expenseFilters, status: e.target.value})}>
-                      <option value="Todos">Todos</option>
-                      <option value="Pagado">Pagado</option>
-                      <option value="Adeudo">Adeudo</option>
-                    </select>
-                  </div>
-                </div>
-                <button type="button" onClick={() => setExpenseFilters({ search: '', category: 'Todas', status: 'Todos' })} className="mt-4 text-xs font-bold text-slate-500 hover:text-slate-800 underline">Limpiar filtros</button>
-              </div>
-
               <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-2xl shadow-sm border border-indigo-100 flex flex-col md:flex-row gap-4 items-center">
                   <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm shrink-0"><Sparkles className="text-indigo-500 w-6 h-6" /></div>
                   <div className="flex-1 w-full"><h4 className="text-sm font-bold text-indigo-900 mb-1">Registro Mágico</h4>
-                      <div className="flex flex-col md:flex-row gap-2">
+                      <div className="flex gap-2">
                           <input type="text" placeholder='Ej. "Compré cloro en Walmart por 500 pesos"' className="w-full p-3 bg-white border border-indigo-200 rounded-xl focus:ring-2 focus:ring-indigo-400 outline-none text-sm text-slate-700" value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAIParse()} />
-                          <button onClick={handleAIParse} disabled={isAiLoading} className="bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors shrink-0 shadow-md disabled:opacity-50 flex items-center justify-center min-w-[150px]">{isAiLoading ? <Loader2 className="w-5 h-5 animate-spin mx-auto"/> : '✨ Autocompletar'}</button>
+                          <button onClick={handleAIParse} disabled={isAiLoading} className="bg-indigo-600 text-white font-bold px-6 rounded-xl hover:bg-indigo-700 transition-colors shrink-0 shadow-md disabled:opacity-50 flex items-center justify-center min-w-[150px]">{isAiLoading ? <Loader2 className="w-5 h-5 animate-spin mx-auto"/> : '✨ Autocompletar'}</button>
                       </div>
                   </div>
               </div>
-
-              {showExpenseFormModal && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden max-h-[92vh] flex flex-col">
-                    <div className="bg-slate-50 p-5 border-b border-slate-100 flex justify-between items-center shrink-0">
-                      <div>
-                        <h3 className="font-black text-xl text-slate-800">Nuevo gasto</h3>
-                        <p className="text-xs text-slate-500 mt-1 font-bold">Captura fecha, proveedor, categoría, monto y observaciones.</p>
-                      </div>
-                      <button type="button" onClick={() => setShowExpenseFormModal(false)} className="w-9 h-9 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"><i className="fa-solid fa-xmark"></i></button>
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <form onSubmit={handleSaveExpense} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="flex justify-between items-center text-xs font-bold text-slate-500 mb-1">Categoría <button type="button" onClick={() => setShowCatModal(true)} className="text-emerald-600 hover:text-emerald-700 flex items-center gap-1"><Settings className="w-3 h-3"/> Administrar</button></label>
+                      <select required className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.category} onChange={e=>setForm({...form, category: e.target.value})}>{expenseCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
                     </div>
-
-                    <form onSubmit={handleSaveExpense} className="p-5 space-y-4 overflow-y-auto">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Fecha</label>
-                          <input type="date" required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={form.date} onChange={e=>setForm({...form, date: e.target.value})}/>
-                        </div>
-                        <div>
-                          <label className="flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Categoría <button type="button" onClick={() => setShowCatModal(true)} className="normal-case tracking-normal text-emerald-600 hover:text-emerald-700 flex items-center gap-1"><Settings className="w-3 h-3"/> Administrar</button></label>
-                          <select required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={form.category} onChange={e=>setForm({...form, category: e.target.value})}>{expenseCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Proveedor</label>
-                          <input type="text" placeholder="Ej. Walmart, CFE, Jardinero" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={form.provider} onChange={e=>setForm({...form, provider: e.target.value})}/>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Monto ($)</label>
-                          <input type="number" required min="1" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-black text-rose-600" value={form.amount} onChange={e=>setForm({...form, amount: e.target.value})}/>
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Descripción</label>
-                        <input type="text" required placeholder="Ej. Cloro, agua, pintura, mantenimiento" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={form.description} onChange={e=>setForm({...form, description: e.target.value})}/>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Estado</label>
-                          <select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={form.status} onChange={e=>setForm({...form, status: e.target.value})}><option value="Pagado">Pagado</option><option value="Adeudo">Adeudo</option></select>
-                        </div>
-                        <div className="md:col-span-2">
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Observaciones</label>
-                          <input type="text" placeholder="Ej. Factura pendiente" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})}/>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row gap-3 pt-2 border-t border-slate-100">
-                        <button type="button" onClick={() => setShowExpenseFormModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 rounded-xl transition-colors">Cancelar</button>
-                        <button type="submit" className="flex-1 bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-emerald-600 transition-colors shadow-lg">Guardar gasto</button>
-                      </div>
-                    </form>
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Monto ($)</label><input type="number" required min="1" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.amount} onChange={e=>setForm({...form, amount: e.target.value})}/></div>
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Descripción</label><input type="text" required placeholder="Ej. Pintura blanca" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.description} onChange={e=>setForm({...form, description: e.target.value})}/></div>
                   </div>
-                </div>
-              )}
-
-              <button type="button" onClick={() => setShowExpenseFormModal(true)} className="fixed bottom-6 right-6 z-40 md:hidden w-14 h-14 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center hover:bg-emerald-600 transition-colors" title="Nuevo gasto">
-                <PlusCircle className="w-7 h-7"/>
-              </button>
-
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Estado</label><select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.status} onChange={e=>setForm({...form, status: e.target.value})}><option value="Pagado">Pagado</option><option value="Adeudo">Adeudo</option></select></div>
+                    <div className="md:col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Observaciones (Opcional)</label><input type="text" placeholder="Ej. Factura pendiente" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-colors" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})}/></div>
+                    <div><button type="submit" className="w-full bg-slate-900 text-white font-bold py-2.5 px-4 rounded-lg hover:bg-slate-800 transition-colors shadow-md">Guardar Nuevo</button></div>
+                  </div>
+                </form>
+              </div>
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="overflow-x-auto pb-2">
-                  <table className="w-full text-left min-w-[1050px]">
-                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-bold border-b border-slate-200"><tr><th className="p-4 text-center w-24">Acciones</th><th className="p-4">Fecha</th><th className="p-4">Proveedor</th><th className="p-4">Descripción</th><th className="p-4">Categoría</th><th className="p-4 text-center">Estado</th><th className="p-4 text-right">Monto</th><th className="p-4">Observaciones</th></tr></thead>
+                  <table className="w-full text-left min-w-[900px]">
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-bold border-b border-slate-200"><tr><th className="p-4 text-center w-24">Acciones</th><th className="p-4">Fecha</th><th className="p-4">Descripción</th><th className="p-4">Categoría</th><th className="p-4 text-center">Estado</th><th className="p-4 text-right">Monto</th><th className="p-4">Observaciones</th></tr></thead>
                     <tbody className="divide-y divide-slate-100">
-                      {filteredExpenses.length === 0 ? ( <tr><td colSpan="8" className="p-8 text-center text-slate-400">Sin gastos registrados con esos filtros</td></tr>
-                      ) : filteredExpenses.map(e => (
+                      {expenses.length === 0 ? ( <tr><td colSpan="7" className="p-8 text-center text-slate-400">Sin gastos registrados</td></tr>
+                      ) : expenses.map(e => (
                         <tr key={e.id} className="hover:bg-slate-50">
                           <td className="p-4 text-center"><div className="flex items-center justify-center gap-2"><button type="button" onClick={() => handleEdit(e)} className="w-8 h-8 bg-slate-200 text-slate-700 hover:bg-blue-100 hover:text-blue-700 rounded-full flex items-center justify-center shadow-sm"><i className="fa-solid fa-pen text-sm"></i></button><button type="button" onClick={() => handleDeleteExpense(e.id)} className="w-8 h-8 bg-slate-200 text-slate-700 hover:bg-rose-100 hover:text-rose-700 rounded-full flex items-center justify-center shadow-sm"><i className="fa-solid fa-trash text-sm"></i></button></div></td>
                           <td className="p-4 text-sm font-bold">{e._fechaStr}</td>
-                          <td className="p-4 text-sm font-black text-slate-700">{e._provider || 'Sin proveedor'}</td>
                           <td className="p-4 font-medium text-slate-700">{e._desc} <span className="text-[9px] text-emerald-600 bg-emerald-50 ml-2 px-1 py-0.5 rounded border border-emerald-100">Por: {e.recordedBy || 'Admin'}</span></td>
                           <td className="p-4 text-xs font-bold uppercase text-slate-400">{e._cat}</td>
                           <td className="p-4 text-center"><span className={`text-[10px] font-bold px-2 py-1 rounded-md ${e._status === 'Adeudo' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{e._status === 'Adeudo' ? 'ADEUDO' : 'PAGADO'}</span></td>
@@ -2082,14 +1572,13 @@
                   </table>
                </div>
               </div>
-
+              {/* Modal Edición de Gasto */}
               {editingExpense && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
                   <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-0">
                     <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center"><div><h3 className="font-black text-xl text-slate-800">Editar Gasto</h3></div><button type="button" onClick={() => setEditingExpense(null)} className="w-8 h-8 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"><i className="fa-solid fa-xmark"></i></button></div>
                     <form onSubmit={handleSaveExpense} className="p-6 space-y-4">
                       <div className="grid grid-cols-2 gap-4"><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Fecha</label><input type="date" className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.date} onChange={e => setEditingExpense({...editingExpense, date: e.target.value})} required/></div><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Categoría</label><select className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.category} onChange={e => setEditingExpense({...editingExpense, category: e.target.value})} required>{expenseCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div></div>
-                      <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Proveedor</label><input type="text" className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.provider || ''} onChange={e => setEditingExpense({...editingExpense, provider: e.target.value})}/></div>
                       <div className="grid grid-cols-2 gap-4"><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Monto ($)</label><input type="number" className="w-full p-3 bg-slate-50 border rounded-xl outline-none text-rose-600 font-bold" value={editingExpense.amount} onChange={e => setEditingExpense({...editingExpense, amount: e.target.value})} required/></div><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Estado</label><select className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.status} onChange={e => setEditingExpense({...editingExpense, status: e.target.value})}><option value="Pagado">Pagado</option><option value="Adeudo">Adeudo</option></select></div></div>
                       <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Descripción</label><input type="text" className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.description} onChange={e => setEditingExpense({...editingExpense, description: e.target.value})} required/></div>
                       <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Observaciones</label><textarea className="w-full p-3 bg-slate-50 border rounded-xl outline-none resize-none" rows="2" value={editingExpense.notes} onChange={e => setEditingExpense({...editingExpense, notes: e.target.value})}></textarea></div>
@@ -2098,7 +1587,6 @@
                   </div>
                 </div>
               )}
-
               {showCatModal && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
                   <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-6">
@@ -2113,8 +1601,8 @@
           );
         }
 
-        function MarketingHub({ db, bookings, handleCopyText, showToast, callGeminiAI, onReservationCreated }) {
-          const [contractData, setContractData] = useState({ client: '', phone: '', email: '', date: '', type: '', startTime: '', endTime: '', salon: '', depto: '', discount: '', deposit: '' });
+        function MarketingHub({ handleCopyText, showToast, callGeminiAI }) {
+          const [contractData, setContractData] = useState({ client: '', date: '', type: '', startTime: '', endTime: '', salon: '', depto: '', discount: '', deposit: '' });
           const [generatedContract, setGeneratedContract] = useState('');
           const [lockCode, setLockCode] = useState('');
           const [manualIncludesDepto, setManualIncludesDepto] = useState(false);
@@ -2125,11 +1613,6 @@
           const [generatedPost, setGeneratedPost] = useState('');
           const [isAiLoading, setIsAiLoading] = useState(false);
           const [copiedPost, setCopiedPost] = useState(false);
-          const [contractReservationNotice, setContractReservationNotice] = useState(null);
-
-          const setContractNotice = (msg, type = 'info') => {
-            setContractReservationNotice({ msg, type });
-          };
 
           const handleGeneratePost = async () => {
               if(!aiPostTopic.trim()) return showToast('Escribe de qué tratará tu post', 'error');
@@ -2141,82 +1624,9 @@
               } catch (err) { showToast('IA: ' + (err.message || 'Error desconocido'), 'error'); } finally { setIsAiLoading(false); }
           };
 
-          const calculateContractTotals = () => {
-            const salon = Number(contractData.salon) || 0;
-            const depto = Number(contractData.depto) || 0;
-            const discountPct = Number(contractData.discount) || 0;
-            const deposit = Number(contractData.deposit) || 0;
-            const subtotal = salon + depto;
-            const discountAmount = subtotal * (discountPct / 100);
-            const total = Math.max(0, subtotal - discountAmount);
-            const balance = total - deposit;
-            return { salon, depto, discountPct, deposit, subtotal, discountAmount, total, balance };
-          };
-
-          const handleCreateReservationFromContract = async () => {
-            setContractReservationNotice(null);
-            const client = contractData.client.trim();
-            const date = contractData.date;
-            if (!client || !date) {
-              setContractNotice('Cliente y fecha son obligatorios para crear la reserva.', 'error');
-              return showToast('Cliente y fecha son obligatorios para crear la reserva', 'error');
-            }
-
-            const { salon, depto, discountPct, deposit, total } = calculateContractTotals();
-            if (total <= 0) {
-              setContractNotice('El total del contrato debe ser mayor a $0.', 'error');
-              return showToast('El total del contrato debe ser mayor a $0', 'error');
-            }
-
-            try {
-              // Validación local rápida y validación directa en Firestore.
-              // La validación directa evita sobrescribir una fecha aunque la lista local de bookings no se haya actualizado todavía.
-              const isDateAlreadyBookedLocal = bookings.some(b => b._fechaStr === date || b.date === date || b.id === date);
-              const reservationRef = doc(db, 'reservaciones', date);
-              const existingReservation = await getDoc(reservationRef);
-
-              if (isDateAlreadyBookedLocal || existingReservation.exists()) {
-                const occupiedMsg = '⚠️ Esta fecha ya está reservada o bloqueada. No se creó otra reserva.';
-                setContractNotice(occupiedMsg, 'error');
-                showToast(occupiedMsg, 'error');
-                return;
-              }
-
-              const newStatus = deposit > 0 ? 'Anticipado' : 'Pendiente';
-
-              await setDoc(reservationRef, {
-                date,
-                status: newStatus,
-                precio_total: total,
-                base_event_total: total,
-                extras: [],
-                extras_total: 0,
-                anticipo: deposit,
-                depto_incluido: depto > 0,
-                cliente_nombre: client,
-                cliente_telefono: contractData.phone || '',
-                cliente_correo: contractData.email || '',
-                tipo_evento: contractData.type || '',
-                horario_inicio: contractData.startTime || '',
-                horario_fin: contractData.endTime || '',
-                costo_salon: salon,
-                costo_depto: depto,
-                descuento_aplicado: discountPct,
-                origen: 'hub_contrato',
-                timestamp: new Date().toISOString()
-              });
-              setContractNotice('✅ Reserva creada correctamente desde el contrato. Ya puedes revisarla en Centro de Reservas.', 'success');
-              showToast('Reserva creada desde contrato');
-              if (onReservationCreated) onReservationCreated();
-            } catch (err) {
-              console.error(err);
-              setContractNotice('Error al crear reserva: ' + err.message, 'error');
-              showToast('Error al crear reserva: ' + err.message, 'error');
-            }
-          };
-
           const generateContract = () => {
-            const { salon, depto, discountPct, deposit, subtotal, discountAmount, total, balance } = calculateContractTotals();
+            const salon = Number(contractData.salon) || 0; const depto = Number(contractData.depto) || 0; const discountPct = Number(contractData.discount) || 0; const deposit = Number(contractData.deposit) || 0;
+            const subtotal = salon + depto; const discountAmount = subtotal * (discountPct / 100); const total = subtotal - discountAmount; const balance = total - deposit;
             const today = new Date(); const todayStr = `${today.getDate()}/${today.getMonth()+1}/${today.getFullYear()}`;
             let dateFormatted = '[Fecha]'; if (contractData.date) { const parts = contractData.date.split('-'); dateFormatted = `${parts[2]}/${parts[1]}/${parts[0]}`; }
             let costBreakdown = "";
@@ -2260,19 +1670,11 @@
                   <div className="mb-6"><h3 className="font-black text-slate-800 text-xl">Generador de Contratos</h3></div>
                   <div className="space-y-4">
                     <input type="text" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" placeholder="Nombre Cliente" value={contractData.client} onChange={e=>setContractData({...contractData, client: e.target.value})}/>
-                    <div className="grid grid-cols-2 gap-4"><input type="tel" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" placeholder="Teléfono" value={contractData.phone} onChange={e=>setContractData({...contractData, phone: e.target.value})}/><input type="email" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" placeholder="Correo" value={contractData.email} onChange={e=>setContractData({...contractData, email: e.target.value})}/></div>
                     <div className="grid grid-cols-2 gap-4"><input type="date" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.date} onChange={e=>setContractData({...contractData, date: e.target.value})}/><input type="text" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" placeholder="Tipo (Ej. Cumpleaños)" value={contractData.type} onChange={e=>setContractData({...contractData, type: e.target.value})}/></div>
                     <div className="grid grid-cols-2 gap-4"><input type="time" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.startTime} onChange={e=>setContractData({...contractData, startTime: e.target.value})}/><input type="time" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.endTime} onChange={e=>setContractData({...contractData, endTime: e.target.value})}/></div>
                     <div className="grid grid-cols-2 gap-4"><input type="number" placeholder="Costo Salón" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.salon} onChange={e=>setContractData({...contractData, salon: e.target.value})}/><input type="number" placeholder="Costo Depto" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.depto} onChange={e=>setContractData({...contractData, depto: e.target.value})}/></div>
                     <div className="grid grid-cols-2 gap-4"><input type="number" placeholder="Descuento (%)" className="w-full p-2.5 border rounded-lg bg-blue-50 text-blue-700 font-bold text-sm" value={contractData.discount} onChange={e=>setContractData({...contractData, discount: e.target.value})}/><input type="number" placeholder="Anticipo Recibido" className="w-full p-2.5 border rounded-lg bg-emerald-50 text-emerald-700 font-bold text-sm" value={contractData.deposit} onChange={e=>setContractData({...contractData, deposit: e.target.value})}/></div>
                     <button onClick={generateContract} className="w-full bg-slate-900 text-white font-bold py-3.5 mt-2 rounded-xl hover:bg-slate-800">Generar Contrato</button>
-                    <button onClick={handleCreateReservationFromContract} className="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-xl hover:bg-emerald-700 shadow-md shadow-emerald-100 flex items-center justify-center gap-2"><i className="fa-solid fa-calendar-check"></i> Crear reserva desde contrato</button>
-                    {contractReservationNotice && (
-                      <div className={`rounded-xl border px-4 py-3 text-sm font-bold leading-relaxed ${contractReservationNotice.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
-                        {contractReservationNotice.msg}
-                      </div>
-                    )}
-                    <p className="text-[10px] text-slate-400 font-bold leading-relaxed bg-slate-50 border border-slate-100 rounded-xl p-3">Este botón crea la reserva en Centro de Reservas usando la fecha del contrato. Si la fecha ya existe, no sobrescribe nada.</p>
                   </div>
                 </div>
                 <div className="space-y-6 h-full flex flex-col">
