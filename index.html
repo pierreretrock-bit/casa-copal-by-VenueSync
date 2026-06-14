@@ -118,9 +118,9 @@
         };
 
         const TEAM_PROFILES = {
-          'pierreretrock@gmail.com': { id: 'admin', name: 'Pierre', role: 'Administrador', canViewAll: true },
-          'faviolavizcarratirado@gmail.com': { id: 'fabiola', name: 'Fabiola', role: 'Finanzas', canViewAll: true },
-          'gpecamargo19@gmail.com': { id: 'lupita', name: 'Lupita', role: 'Capturista', canViewAll: false }
+          'pierreretrock@gmail.com': { id: 'admin', name: 'Pierre', role: 'Administrador', canViewAll: true, canViewBookings: true, canManageBookings: true, canViewBookingFinancials: true, canViewExpenses: true },
+          'faviolavizcarratirado@gmail.com': { id: 'fabiola', name: 'Fabiola', role: 'Finanzas', canViewAll: true, canViewBookings: true, canManageBookings: true, canViewBookingFinancials: true, canViewExpenses: true },
+          'gpecamargo19@gmail.com': { id: 'lupita', name: 'Lupita', role: 'Asistente operativa', canViewAll: false, canViewBookings: true, canManageBookings: false, canViewBookingFinancials: false, canViewExpenses: true }
         };
 
         function CasaCopalAdmin() {
@@ -148,10 +148,11 @@
             const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
               setUser(currentUser);
               if (currentUser && currentUser.email) {
-                const profile = TEAM_PROFILES[currentUser.email] || { id: 'guest', name: 'Usuario Limitado', role: 'Invitado', canViewAll: false };
+                const profile = TEAM_PROFILES[currentUser.email] || { id: 'guest', name: 'Usuario Limitado', role: 'Invitado', canViewAll: false, canViewBookings: false, canManageBookings: false, canViewBookingFinancials: false, canViewExpenses: true };
                 setActiveProfile({ ...profile, email: currentUser.email });
-                if (!profile.canViewAll) setActiveTab('expenses');
-                else setActiveTab('dashboard');
+                if (profile.canViewAll) setActiveTab('dashboard');
+                else if (profile.canViewBookings) setActiveTab('bookings');
+                else setActiveTab('expenses');
               }
               setIsAuthChecking(false);
             });
@@ -532,13 +533,17 @@
 
                 <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
                   {activeProfile.canViewAll && (
-                    <>
-                      <NavItem icon={<LayoutDashboard/>} label="Dashboard" isActive={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }} />
-                      <NavItem icon={<CalendarDays/>} label="Centro de Reservas" isActive={activeTab === 'bookings'} onClick={() => { setActiveTab('bookings'); setIsMobileMenuOpen(false); }} badge={bookings.filter(b => b._status === 'Pendiente' || b._status === 'Anticipado').length} />
-                      <NavItem icon={<FileText/>} label="Cotizaciones" isActive={activeTab === 'quotes'} onClick={() => { setActiveTab('quotes'); setIsMobileMenuOpen(false); }} />
-                    </>
+                    <NavItem icon={<LayoutDashboard/>} label="Dashboard" isActive={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }} />
                   )}
-                  <NavItem icon={<WalletCards/>} label="Gastos Operativos" isActive={activeTab === 'expenses'} onClick={() => { setActiveTab('expenses'); setIsMobileMenuOpen(false); }} />
+                  {(activeProfile.canViewAll || activeProfile.canViewBookings) && (
+                    <NavItem icon={<CalendarDays/>} label="Centro de Reservas" isActive={activeTab === 'bookings'} onClick={() => { setActiveTab('bookings'); setIsMobileMenuOpen(false); }} badge={bookings.filter(b => b._status === 'Pendiente' || b._status === 'Anticipado').length} />
+                  )}
+                  {activeProfile.canViewAll && (
+                    <NavItem icon={<FileText/>} label="Cotizaciones" isActive={activeTab === 'quotes'} onClick={() => { setActiveTab('quotes'); setIsMobileMenuOpen(false); }} />
+                  )}
+                  {(activeProfile.canViewAll || activeProfile.canViewExpenses) && (
+                    <NavItem icon={<WalletCards/>} label="Gastos Operativos" isActive={activeTab === 'expenses'} onClick={() => { setActiveTab('expenses'); setIsMobileMenuOpen(false); }} />
+                  )}
                   
                   {activeProfile.canViewAll && (
                     <>
@@ -619,11 +624,11 @@
                     </div>
                   )}
 
-                  {activeTab === 'bookings' && activeProfile.canViewAll && <BookingsModule db={db} bookings={bookings} showToast={showToast} initialData={quoteToConvert} clearInitialData={() => setQuoteToConvert(null)} />}
+                  {activeTab === 'bookings' && (activeProfile.canViewAll || activeProfile.canViewBookings) && <BookingsModule db={db} bookings={bookings} showToast={showToast} initialData={quoteToConvert} clearInitialData={() => setQuoteToConvert(null)} activeProfile={activeProfile} />}
                   
                   {activeTab === 'quotes' && activeProfile.canViewAll && <QuotesModule db={db} quotes={quotes} showToast={showToast} onConvertToBooking={(q) => { setQuoteToConvert(q); setActiveTab('bookings'); }} />}
 
-                  {activeTab === 'expenses' && <ExpensesModule db={db} expenses={expenses} expenseCategories={expenseCategories} activeProfile={activeProfile} showToast={showToast} callGeminiAI={callGeminiAI} />}
+                  {activeTab === 'expenses' && (activeProfile.canViewAll || activeProfile.canViewExpenses) && <ExpensesModule db={db} expenses={expenses} expenseCategories={expenseCategories} activeProfile={activeProfile} showToast={showToast} callGeminiAI={callGeminiAI} />}
                   
                   {activeTab === 'clients' && activeProfile.canViewAll && <ClientsModule db={db} clients={clients} clientNotes={clientNotes} showToast={showToast} />}
                   
@@ -1039,7 +1044,9 @@
           );
         }
 
-        function BookingsModule({ db, bookings, showToast, initialData, clearInitialData }) {
+        function BookingsModule({ db, bookings, showToast, initialData, clearInitialData, activeProfile }) {
+          const canManageBookings = activeProfile?.canManageBookings !== false;
+          const canViewBookingFinancials = activeProfile?.canViewBookingFinancials !== false;
           const [form, setForm] = useState({ date: '', name: '', phone: '', email: '', isWeekend: false, includesDepto: false, discount: 0, anticipo: '' });
           const [bookingToFree, setBookingToFree] = useState(null); 
           const [editingBooking, setEditingBooking] = useState(null); 
@@ -1049,7 +1056,7 @@
           const [showBookingFormModal, setShowBookingFormModal] = useState(false);
           
           useEffect(() => {
-            if (initialData) {
+            if (initialData && canManageBookings) {
               const d = new Date(initialData.date + 'T12:00:00');
               const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
               setForm(prev => ({...prev, date: initialData.date, name: initialData.cliente_nombre, phone: initialData.cliente_telefono, email: initialData.cliente_correo || '', includesDepto: initialData.depto_incluido, discount: initialData.descuento_aplicado, isWeekend: isWknd}));
@@ -1140,13 +1147,13 @@
                 getBookingOrigin(b),
                 b.depto_incluido ? 'depto departamento' : 'solo salon',
                 normalizeBookingExtras(b.extras || b._extras).map(extra => `${extra.concepto} ${extra.nota}`).join(' '),
-                b._precioTotal,
-                b._anticipo
+                canViewBookingFinancials ? b._precioTotal : '',
+                canViewBookingFinancials ? b._anticipo : ''
               ].join(' ').toLowerCase();
 
               return searchText.includes(term);
             });
-          }, [bookings, bookingSearchTerm, bookingStatusFilter]);
+          }, [bookings, bookingSearchTerm, bookingStatusFilter, canViewBookingFinancials]);
 
           const handleExportReservationsToCSV = () => {
             if (bookings.length === 0) {
@@ -1396,20 +1403,31 @@
                   <h2 className="text-3xl font-black text-slate-800">Centro de Reservas</h2>
                   <p className="text-slate-500">Unificación de Página Web y Bloqueos Manuales.</p>
                 </div>
-                <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
-                  <button onClick={() => setShowBookingFormModal(true)} className="bg-slate-900 hover:bg-emerald-600 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2">
-                    <PlusCircle className="w-4 h-4"/> Nueva reserva
-                  </button>
-                  <button onClick={handleExportReservationsToCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2">
-                    <FileSpreadsheet className="w-4 h-4"/> Descargar a Excel
-                  </button>
-                </div>
+                {canManageBookings && (
+                  <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                    <button onClick={() => setShowBookingFormModal(true)} className="bg-slate-900 hover:bg-emerald-600 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2">
+                      <PlusCircle className="w-4 h-4"/> Nueva reserva
+                    </button>
+                    {canViewBookingFinancials && (
+                      <button onClick={handleExportReservationsToCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2">
+                        <FileSpreadsheet className="w-4 h-4"/> Descargar a Excel
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
-                <h3 className="font-black text-slate-800 flex items-center gap-2"><i className="fa-solid fa-calendar-plus text-emerald-600"></i> Captura de reservas</h3>
-                <p className="text-sm text-slate-500 font-medium mt-1">El formulario de agendar evento queda oculto para mantener limpia la pantalla. Usa el botón <strong>+ Nueva reserva</strong> de la parte superior cuando necesites bloquear una fecha.</p>
-              </div>
+              {canManageBookings ? (
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                  <h3 className="font-black text-slate-800 flex items-center gap-2"><i className="fa-solid fa-calendar-plus text-emerald-600"></i> Captura de reservas</h3>
+                  <p className="text-sm text-slate-500 font-medium mt-1">El formulario de agendar evento queda oculto para mantener limpia la pantalla. Usa el botón <strong>+ Nueva reserva</strong> de la parte superior cuando necesites bloquear una fecha.</p>
+                </div>
+              ) : (
+                <div className="bg-blue-50 p-5 rounded-2xl shadow-sm border border-blue-100">
+                  <h3 className="font-black text-blue-800 flex items-center gap-2"><i className="fa-solid fa-eye text-blue-600"></i> Consulta de reservas</h3>
+                  <p className="text-sm text-blue-700 font-medium mt-1">Este perfil solo puede visualizar reservas. No puede crear, editar, aprobar, liquidar ni liberar fechas.</p>
+                </div>
+              )}
 
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                 <div className="flex flex-col lg:flex-row gap-4 lg:items-end lg:justify-between">
@@ -1461,19 +1479,19 @@
                   <table className="w-full text-left border-collapse min-w-[950px]">
                     <thead>
                       <tr className="text-slate-400 text-xs font-bold uppercase tracking-widest border-b border-slate-100">
-                        <th className="p-6 font-bold w-12 text-center"></th>
+                        {canManageBookings && <th className="p-6 font-bold w-12 text-center"></th>}
                         <th className="p-6 font-bold w-32">Fecha</th>
                         <th className="p-6 font-bold">Cliente / Info</th>
                         <th className="p-6 font-bold text-center">Estado</th>
-                        <th className="p-6 font-bold w-48">Finanzas</th>
-                        <th className="p-6 font-bold text-right w-48">Acciones</th>
+                        {canViewBookingFinancials && <th className="p-6 font-bold w-48">Finanzas</th>}
+                        <th className="p-6 font-bold text-right w-48">{canManageBookings ? 'Acciones' : 'Permiso'}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {bookings.length === 0 ? (
-                        <tr><td colSpan="6" className="p-12 text-center text-slate-400 font-bold">Sin eventos en la base de datos</td></tr>
+                        <tr><td colSpan={canViewBookingFinancials && canManageBookings ? 6 : canManageBookings || canViewBookingFinancials ? 5 : 4} className="p-12 text-center text-slate-400 font-bold">Sin eventos en la base de datos</td></tr>
                       ) : filteredBookings.length === 0 ? (
-                        <tr><td colSpan="6" className="p-12 text-center text-slate-400 font-bold">No hay reservas que coincidan con la búsqueda o filtro seleccionado</td></tr>
+                        <tr><td colSpan={canViewBookingFinancials && canManageBookings ? 6 : canManageBookings || canViewBookingFinancials ? 5 : 4} className="p-12 text-center text-slate-400 font-bold">No hay reservas que coincidan con la búsqueda o filtro seleccionado</td></tr>
                       ) : filteredBookings.map(b => {
                         const total = b._precioTotal;
                         const anticipo = b._anticipo;
@@ -1486,16 +1504,18 @@
                         
                         return (
                         <tr key={b.id} className={`hover:bg-slate-50/50 transition-colors ${b._fechaStr && b._fechaStr < new Date().toISOString().split('T')[0] ? 'opacity-60' : ''}`}>
-                          <td className="p-6 align-top text-center">
-                            <button onClick={() => {
-                              const bookingExtras = normalizeBookingExtras(b.extras || b._extras);
-                              const bookingExtrasTotal = Number(b.extras_total || b._extrasTotal || calculateExtrasTotal(bookingExtras)) || 0;
-                              const bookingBaseTotal = Number(b.base_event_total ?? b._baseEventTotal ?? Math.max(0, b._precioTotal - bookingExtrasTotal)) || 0;
-                              setEditingBooking({...b, date: b._fechaStr, cliente_nombre: b._nombreStr, cliente_telefono: b._telefonoStr, cliente_correo: b._correoStr, base_event_total: bookingBaseTotal, extras: bookingExtras, extras_total: bookingExtrasTotal, precio_total: b._precioTotal, anticipo: b._anticipo});
-                            }} className="w-10 h-10 bg-slate-200 text-slate-700 hover:bg-emerald-100 hover:text-emerald-700 rounded-full transition-colors flex items-center justify-center shadow-md mx-auto" title="Editar Reserva">
-                              <i className="fa-solid fa-pen text-base"></i>
-                            </button>
-                          </td>
+                          {canManageBookings && (
+                            <td className="p-6 align-top text-center">
+                              <button onClick={() => {
+                                const bookingExtras = normalizeBookingExtras(b.extras || b._extras);
+                                const bookingExtrasTotal = Number(b.extras_total || b._extrasTotal || calculateExtrasTotal(bookingExtras)) || 0;
+                                const bookingBaseTotal = Number(b.base_event_total ?? b._baseEventTotal ?? Math.max(0, b._precioTotal - bookingExtrasTotal)) || 0;
+                                setEditingBooking({...b, date: b._fechaStr, cliente_nombre: b._nombreStr, cliente_telefono: b._telefonoStr, cliente_correo: b._correoStr, base_event_total: bookingBaseTotal, extras: bookingExtras, extras_total: bookingExtrasTotal, precio_total: b._precioTotal, anticipo: b._anticipo});
+                              }} className="w-10 h-10 bg-slate-200 text-slate-700 hover:bg-emerald-100 hover:text-emerald-700 rounded-full transition-colors flex items-center justify-center shadow-md mx-auto" title="Editar Reserva">
+                                <i className="fa-solid fa-pen text-base"></i>
+                              </button>
+                            </td>
+                          )}
                           <td className="p-6 align-top text-center">
                             {status === 'Liquidado' ? (
                               <span className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-widest block"><i className="fa-solid fa-check-double mr-1"></i> {b._precioTotal === 0 ? 'Cortesía' : 'Liquidado'}</span>
@@ -1523,46 +1543,54 @@
                               {b._correoStr && (
                                 <span className="inline-flex items-center gap-1.5 text-[10px] text-slate-500 font-medium"><i className="fa-regular fa-envelope text-slate-400"></i> {b._correoStr}</span>
                               )}
-                              {b._correoStr && (
+                              {b._correoStr && canManageBookings && canViewBookingFinancials && (
                                 <button onClick={() => handleSendEmail(b)} className="mt-1 inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-sm transition-colors w-fit" title="Enviar Confirmación por Correo">
                                   <i className="fa-solid fa-paper-plane text-blue-500"></i> Enviar Recibo
                                 </button>
                               )}
                             </div>
                           </td>
-                          <td className="p-6 align-top">
-                            <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 relative">
-                              <div className="flex justify-between items-start mb-1 gap-2">
-                                <p className="text-xs text-slate-500 font-medium">Total: <strong className="text-slate-800">${total.toLocaleString()}</strong></p>
-                                <div className="shrink-0">{b.depto_incluido ? <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest shadow-sm whitespace-nowrap">+ Depto</span> : <span className="bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest shadow-sm whitespace-nowrap">Solo Salón</span>}</div>
-                              </div>
-                              {extrasTotal > 0 && (
-                                <div className="border-t border-slate-200 pt-1 mt-1 mb-1">
-                                  <p className="text-[10px] text-slate-500 font-bold">Base: <strong className="text-slate-700">${baseTotal.toLocaleString()}</strong></p>
-                                  <p className="text-[10px] text-blue-600 font-bold">Extras: <strong>${extrasTotal.toLocaleString()}</strong></p>
-                                  <div className="mt-1 space-y-0.5">
-                                    {extras.slice(0, 2).map(extra => <p key={extra.id} className="text-[9px] text-slate-500 truncate">+ {extra.concepto}: ${Number(extra.total || 0).toLocaleString()}</p>)}
-                                    {extras.length > 2 && <p className="text-[9px] text-slate-400">+ {extras.length - 2} extra(s) más</p>}
-                                  </div>
+                          {canViewBookingFinancials && (
+                            <td className="p-6 align-top">
+                              <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 relative">
+                                <div className="flex justify-between items-start mb-1 gap-2">
+                                  <p className="text-xs text-slate-500 font-medium">Total: <strong className="text-slate-800">${total.toLocaleString()}</strong></p>
+                                  <div className="shrink-0">{b.depto_incluido ? <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest shadow-sm whitespace-nowrap">+ Depto</span> : <span className="bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest shadow-sm whitespace-nowrap">Solo Salón</span>}</div>
                                 </div>
-                              )}
-                              <p className="text-xs text-slate-500 font-medium mb-1">Anticipo: <strong className="text-emerald-600">${anticipo.toLocaleString()}</strong></p>
-                              {status !== 'Liquidado' && <p className="text-xs text-rose-500 font-bold border-t border-slate-200 pt-1 mt-1">Saldo: ${saldo.toLocaleString()}</p>}
-                            </div>
-                          </td>
+                                {extrasTotal > 0 && (
+                                  <div className="border-t border-slate-200 pt-1 mt-1 mb-1">
+                                    <p className="text-[10px] text-slate-500 font-bold">Base: <strong className="text-slate-700">${baseTotal.toLocaleString()}</strong></p>
+                                    <p className="text-[10px] text-blue-600 font-bold">Extras: <strong>${extrasTotal.toLocaleString()}</strong></p>
+                                    <div className="mt-1 space-y-0.5">
+                                      {extras.slice(0, 2).map(extra => <p key={extra.id} className="text-[9px] text-slate-500 truncate">+ {extra.concepto}: ${Number(extra.total || 0).toLocaleString()}</p>)}
+                                      {extras.length > 2 && <p className="text-[9px] text-slate-400">+ {extras.length - 2} extra(s) más</p>}
+                                    </div>
+                                  </div>
+                                )}
+                                <p className="text-xs text-slate-500 font-medium mb-1">Anticipo: <strong className="text-emerald-600">${anticipo.toLocaleString()}</strong></p>
+                                {status !== 'Liquidado' && <p className="text-xs text-rose-500 font-bold border-t border-slate-200 pt-1 mt-1">Saldo: ${saldo.toLocaleString()}</p>}
+                              </div>
+                            </td>
+                          )}
                           <td className="p-6 align-top text-right">
-                            <div className="flex flex-col items-end gap-2">
-                              {status === 'Liquidado' ? (
-                                <span className="text-[10px] text-slate-400 font-bold"><i className="fa-solid fa-lock"></i> Pago Completo</span>
-                              ) : status === 'Anticipado' ? (
-                                <button onClick={() => setBookingToLiquidate(b)} className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-full hover:bg-emerald-700 transition-colors shadow-md flex items-center gap-1.5"><i className="fa-solid fa-hand-holding-dollar"></i> Liquidar Saldo</button>
-                              ) : (
-                                <button onClick={() => handleApproveWebBooking(b.id)} className="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-full hover:bg-emerald-600 transition-colors shadow-md flex items-center gap-1.5"><i className="fa-solid fa-check"></i> Aprobar</button>
-                              )}
-                              {(status === 'Anticipado' || status === 'Pendiente') && (
-                                <button onClick={() => setBookingToFree(b)} className="text-[10px] text-rose-400 hover:text-rose-600 font-bold hover:underline transition-colors mt-2">Liberar Fecha</button>
-                              )}
-                            </div>
+                            {canManageBookings ? (
+                              <div className="flex flex-col items-end gap-2">
+                                {status === 'Liquidado' ? (
+                                  <span className="text-[10px] text-slate-400 font-bold"><i className="fa-solid fa-lock"></i> Pago Completo</span>
+                                ) : status === 'Anticipado' ? (
+                                  <button onClick={() => setBookingToLiquidate(b)} className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-full hover:bg-emerald-700 transition-colors shadow-md flex items-center gap-1.5"><i className="fa-solid fa-hand-holding-dollar"></i> Liquidar Saldo</button>
+                                ) : (
+                                  <button onClick={() => handleApproveWebBooking(b.id)} className="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-full hover:bg-emerald-600 transition-colors shadow-md flex items-center gap-1.5"><i className="fa-solid fa-check"></i> Aprobar</button>
+                                )}
+                                {(status === 'Anticipado' || status === 'Pendiente') && (
+                                  <button onClick={() => setBookingToFree(b)} className="text-[10px] text-rose-400 hover:text-rose-600 font-bold hover:underline transition-colors mt-2">Liberar Fecha</button>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="inline-block bg-slate-100 text-slate-500 border border-slate-200 px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-widest">
+                                Solo lectura
+                              </span>
+                            )}
                           </td>
                         </tr>
                       )})}
@@ -1571,7 +1599,7 @@
                 </div>
               </div>
 
-              {showBookingFormModal && (
+              {showBookingFormModal && canManageBookings && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
                   <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden">
                     <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center">
@@ -1644,7 +1672,7 @@
               )}
 
               {/* Modales Reserva */}
-              {editingBooking && (
+              {editingBooking && canManageBookings && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
                   <div className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] overflow-y-auto">
                     <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center">
@@ -1701,7 +1729,7 @@
                   </div>
                 </div>
               )}
-              {bookingToLiquidate && (
+              {bookingToLiquidate && canManageBookings && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
                   <div className="bg-white p-8 rounded-3xl max-w-sm w-full text-center shadow-2xl">
                     <h3 className="text-xl font-black text-slate-800 mb-2">¿Liquidar Evento?</h3>
@@ -1710,7 +1738,7 @@
                   </div>
                 </div>
               )}
-              {bookingToFree && (
+              {bookingToFree && canManageBookings && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
                   <div className="bg-white p-8 rounded-3xl max-w-sm w-full text-center shadow-2xl">
                     <h3 className="text-xl font-black text-slate-800 mb-2">¿Liberar Fecha?</h3>
@@ -1719,14 +1747,16 @@
                   </div>
                 </div>
               )}
-              <button
-                type="button"
-                onClick={() => setShowBookingFormModal(true)}
-                className="md:hidden fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-emerald-600 text-white shadow-2xl flex items-center justify-center hover:bg-emerald-700 transition-colors"
-                title="Nueva reserva"
-              >
-                <PlusCircle className="w-7 h-7"/>
-              </button>
+              {canManageBookings && (
+                <button
+                  type="button"
+                  onClick={() => setShowBookingFormModal(true)}
+                  className="md:hidden fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-emerald-600 text-white shadow-2xl flex items-center justify-center hover:bg-emerald-700 transition-colors"
+                  title="Nueva reserva"
+                >
+                  <PlusCircle className="w-7 h-7"/>
+                </button>
+              )}
 
             </div>
           );
