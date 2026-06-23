@@ -143,6 +143,7 @@
           const [expenseCategories, setExpenseCategories] = useState([]);
           const [quotes, setQuotes] = useState([]); 
           const [quoteToConvert, setQuoteToConvert] = useState(null); 
+          const [webRequests, setWebRequests] = useState([]);
 
           useEffect(() => {
             const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -167,6 +168,7 @@
             const categoriesRef = collection(db, 'categorias_gastos');
             const quotesRef = collection(db, 'cotizaciones');
             const clientsRef = collection(db, 'clientes'); 
+            const webRequestsRef = collection(db, 'solicitudes_reserva');
 
             const handleDbError = (err) => {
               console.error("Firestore Error Capturado de forma segura:", err);
@@ -362,7 +364,43 @@
               setClientNotes(notes);
             }, handleDbError);
 
-            return () => { unsubBookings(); unsubExpenses(); unsubCategories(); unsubQuotes(); unsubClientsNotes(); };
+const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
+  const data = snapshot.docs.map(doc => {
+    const d = doc.data();
+
+    return {
+      id: doc.id,
+      fecha: d.fecha || '',
+      status: d.status || 'pendiente',
+      precio_total: Number(d.precio_total || 0),
+      depto_incluido: d.depto_incluido || false,
+      cliente_nombre: d.cliente_nombre || 'Sin nombre',
+      cliente_telefono: d.cliente_telefono || '',
+      cliente_correo: d.cliente_correo || '',
+      origen: d.origen || 'web_publica',
+      createdAt: d.createdAt || ''
+    };
+  });
+
+  const pendientes = data
+    .filter(req => String(req.status || '').toLowerCase() === 'pendiente')
+    .sort((a, b) => {
+      if (a.createdAt > b.createdAt) return -1;
+      if (a.createdAt < b.createdAt) return 1;
+      return 0;
+    });
+
+  setWebRequests(pendientes);
+}, handleDbError);
+
+            return () => { 
+  unsubBookings(); 
+  unsubExpenses(); 
+  unsubCategories(); 
+  unsubQuotes(); 
+  unsubClientsNotes();
+  unsubWebRequests();
+};
           }, [user]);
 
           const handleLogin = async (e) => {
@@ -624,7 +662,15 @@
                     </div>
                   )}
 
-                  {activeTab === 'bookings' && (activeProfile.canViewAll || activeProfile.canViewBookings) && <BookingsModule db={db} bookings={bookings} showToast={showToast} initialData={quoteToConvert} clearInitialData={() => setQuoteToConvert(null)} activeProfile={activeProfile} />}
+                  {activeTab === 'bookings' && (activeProfile.canViewAll || activeProfile.canViewBookings) && <BookingsModule 
+  db={db} 
+  bookings={bookings}
+  webRequests={webRequests}
+  showToast={showToast} 
+  initialData={quoteToConvert} 
+  clearInitialData={() => setQuoteToConvert(null)} 
+  activeProfile={activeProfile} 
+/>}
                   
                   {activeTab === 'quotes' && activeProfile.canViewAll && <QuotesModule db={db} quotes={quotes} showToast={showToast} onConvertToBooking={(q) => { setQuoteToConvert(q); setActiveTab('bookings'); }} />}
 
@@ -1044,7 +1090,7 @@
           );
         }
 
-        function BookingsModule({ db, bookings, showToast, initialData, clearInitialData, activeProfile }) {
+        function BookingsModule({ db, bookings, webRequests = [], showToast, initialData, clearInitialData, activeProfile }) {
           const canManageBookings = activeProfile?.canManageBookings !== false;
           const canViewBookingFinancials = activeProfile?.canViewBookingFinancials !== false;
           const [form, setForm] = useState({ date: '', name: '', phone: '', email: '', isWeekend: false, includesDepto: false, discount: 0, anticipo: '' });
@@ -1227,7 +1273,86 @@
               setShowBookingFormModal(false);
             } catch(err) { console.error(err); showToast('Error al bloquear', 'error'); }
           };
+          const handleConvertWebRequestToBooking = async (request) => {
+  if (!request || !request.fecha) {
+    return showToast('La solicitud no tiene fecha válida', 'error');
+  }
 
+  const anticipoInput = window.prompt(
+    "Ingresa el monto del anticipo recibido ($). Si aún no han pagado, escribe 0:",
+    "2500"
+  );
+
+  if (anticipoInput === null) return;
+
+  const anticipoNum = Number(anticipoInput) || 0;
+  const newStatus = anticipoNum > 0 ? 'Anticipado' : 'Pendiente';
+
+  try {
+    const reservationRef = doc(db, 'reservaciones', request.fecha);
+    const existingReservation = await getDoc(reservationRef);
+
+    const isDateAlreadyBookedLocal = bookings.some(b => b._fechaStr === request.fecha || b.date === request.fecha || b.id === request.fecha);
+
+    if (existingReservation.exists() || isDateAlreadyBookedLocal) {
+      return showToast('⚠️ Esta fecha ya está reservada o bloqueada. No se convirtió la solicitud.', 'error');
+    }
+
+    await setDoc(reservationRef, {
+      date: request.fecha,
+      status: newStatus,
+      base_event_total: Number(request.precio_total || 0),
+      extras: [],
+      extras_total: 0,
+      precio_total: Number(request.precio_total || 0),
+      anticipo: anticipoNum,
+      depto_incluido: request.depto_incluido || false,
+      cliente_nombre: request.cliente_nombre || 'Sin nombre',
+      cliente_telefono: request.cliente_telefono || '',
+      cliente_correo: request.cliente_correo || '',
+      descuento_aplicado: 0,
+      origen: 'web_publica',
+      solicitudWebId: request.id,
+      timestamp: new Date().toISOString(),
+      createdBy: activeProfile?.name || 'Admin'
+    });
+
+    await updateDoc(doc(db, 'solicitudes_reserva', request.id), {
+      status: 'convertida',
+      convertedAt: new Date().toISOString(),
+      convertedBy: activeProfile?.name || 'Admin',
+      convertedToReservationId: request.fecha
+    });
+
+    showToast(anticipoNum > 0 ? 'Solicitud convertida en reserva con anticipo' : 'Solicitud convertida en reserva pendiente');
+  } catch (err) {
+    console.error(err);
+    showToast('Error al convertir solicitud: ' + err.message, 'error');
+  }
+};
+
+const handleDiscardWebRequest = async (request) => {
+  if (!request || !request.id) {
+    return showToast('Solicitud inválida', 'error');
+  }
+
+  if (!window.confirm('¿Descartar esta solicitud web? No se borrará, solo quedará marcada como descartada.')) {
+    return;
+  }
+
+  try {
+    await updateDoc(doc(db, 'solicitudes_reserva', request.id), {
+      status: 'descartada',
+      discardedAt: new Date().toISOString(),
+      discardedBy: activeProfile?.name || 'Admin'
+    });
+
+    showToast('Solicitud web descartada');
+  } catch (err) {
+    console.error(err);
+    showToast('Error al descartar solicitud: ' + err.message, 'error');
+  }
+};
           const handleApproveWebBooking = async (id) => {
             const amount = window.prompt("Ingresa el monto del anticipo recibido ($) - Ingresa 0 si aún no han pagado:", "2500");
             if (amount !== null) {
@@ -1470,6 +1595,104 @@
                 </div>
               </div>
 
+             {canManageBookings && webRequests.length > 0 && (
+  <div className="bg-amber-50 border border-amber-200 rounded-3xl shadow-sm overflow-hidden">
+    <div className="px-6 py-5 border-b border-amber-200 bg-amber-100/60 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div>
+        <h3 className="font-black text-xl text-amber-900 flex items-center gap-2">
+          <i className="fa-solid fa-bell text-amber-600"></i>
+          Solicitudes Web Pendientes
+        </h3>
+        <p className="text-sm text-amber-800 font-medium mt-1">
+          Estas solicitudes vienen de la página pública. Revísalas y conviértelas en reserva cuando recibas el anticipo.
+        </p>
+      </div>
+      <span className="bg-white text-amber-700 border border-amber-200 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm w-fit">
+        {webRequests.length} pendiente{webRequests.length === 1 ? '' : 's'}
+      </span>
+    </div>
+
+    <div className="p-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {webRequests.map(req => {
+        const isAlreadyBooked = bookings.some(b => b._fechaStr === req.fecha || b.date === req.fecha || b.id === req.fecha);
+        const phoneClean = String(req.cliente_telefono || '').replace(/\D/g, '');
+
+        return (
+          <div key={req.id} className="bg-white border border-amber-200 rounded-2xl p-5 shadow-sm">
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 mb-4">
+              <div>
+                <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest mb-1">Fecha solicitada</p>
+                <h4 className="text-2xl font-black text-slate-800">{req.fecha || 'Sin fecha'}</h4>
+              </div>
+              <span className={`text-[10px] font-black px-3 py-1.5 rounded-lg uppercase tracking-widest w-fit ${isAlreadyBooked ? 'bg-rose-100 text-rose-700 border border-rose-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
+                {isAlreadyBooked ? 'Fecha ya ocupada' : 'Disponible'}
+              </span>
+            </div>
+
+            <div className="space-y-2 mb-4">
+              <p className="font-black text-slate-800">{req.cliente_nombre || 'Sin nombre'}</p>
+
+              {req.cliente_telefono && (
+                <a
+                  href={`https://wa.me/52${phoneClean}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs text-emerald-700 font-bold bg-emerald-50 border border-emerald-100 px-2.5 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors"
+                >
+                  <i className="fa-brands fa-whatsapp text-emerald-500"></i>
+                  {req.cliente_telefono}
+                </a>
+              )}
+
+              {req.cliente_correo && (
+                <p className="text-xs text-slate-500 font-medium">
+                  <i className="fa-regular fa-envelope text-slate-400 mr-1"></i>
+                  {req.cliente_correo}
+                </p>
+              )}
+            </div>
+
+            {canViewBookingFinancials && (
+              <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 mb-4">
+                <div className="flex justify-between items-center gap-3">
+                  <p className="text-xs text-slate-500 font-bold">Total estimado</p>
+                  <p className="text-lg font-black text-slate-800">${Number(req.precio_total || 0).toLocaleString('es-MX')}</p>
+                </div>
+                <div className="flex justify-between items-center gap-3 mt-1">
+                  <p className="text-xs text-slate-500 font-bold">Departamento</p>
+                  <p className={`text-[10px] font-black px-2 py-1 rounded-md uppercase tracking-widest ${req.depto_incluido ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                    {req.depto_incluido ? 'Incluido' : 'Solo salón'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button
+                type="button"
+                onClick={() => handleConvertWebRequestToBooking(req)}
+                disabled={isAlreadyBooked}
+                className={`flex-1 text-xs font-black px-4 py-3 rounded-xl transition-colors shadow-sm ${isAlreadyBooked ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-emerald-600'}`}
+              >
+                <i className="fa-solid fa-check mr-1"></i>
+                Convertir en reserva
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleDiscardWebRequest(req)}
+                className="flex-1 text-xs font-black px-4 py-3 rounded-xl bg-white text-rose-600 border border-rose-200 hover:bg-rose-50 transition-colors"
+              >
+                <i className="fa-solid fa-ban mr-1"></i>
+                Descartar
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+)}
               <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
                 <div className="bg-white border-b border-slate-100 px-8 py-6 flex justify-between items-center">
                   <h3 className="font-black text-xl text-slate-800">Próximos Eventos</h3>
