@@ -1093,19 +1093,44 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
         function BookingsModule({ db, bookings, webRequests = [], showToast, initialData, clearInitialData, activeProfile }) {
           const canManageBookings = activeProfile?.canManageBookings !== false;
           const canViewBookingFinancials = activeProfile?.canViewBookingFinancials !== false;
-          const [form, setForm] = useState({ date: '', name: '', phone: '', email: '', isWeekend: false, includesDepto: false, discount: 0, anticipo: '' });
+          const [form, setForm] = useState({
+  date: '',
+  name: '',
+  phone: '',
+  email: '',
+  type: '',
+  startTime: '',
+  endTime: '',
+  isWeekend: false,
+  includesDepto: false,
+  discount: 0,
+  anticipo: ''
+});
           const [bookingToFree, setBookingToFree] = useState(null); 
           const [editingBooking, setEditingBooking] = useState(null); 
           const [bookingToLiquidate, setBookingToLiquidate] = useState(null);
           const [bookingSearchTerm, setBookingSearchTerm] = useState('');
           const [bookingStatusFilter, setBookingStatusFilter] = useState('Todos');
           const [showBookingFormModal, setShowBookingFormModal] = useState(false);
+          const [contractPreview, setContractPreview] = useState(null);
           
           useEffect(() => {
             if (initialData && canManageBookings) {
               const d = new Date(initialData.date + 'T12:00:00');
               const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-              setForm(prev => ({...prev, date: initialData.date, name: initialData.cliente_nombre, phone: initialData.cliente_telefono, email: initialData.cliente_correo || '', includesDepto: initialData.depto_incluido, discount: initialData.descuento_aplicado, isWeekend: isWknd}));
+              setForm(prev => ({
+  ...prev,
+  date: initialData.date,
+  name: initialData.cliente_nombre,
+  phone: initialData.cliente_telefono,
+  email: initialData.cliente_correo || '',
+  type: initialData.type || '',
+  startTime: '',
+  endTime: '',
+  includesDepto: initialData.depto_incluido,
+  discount: initialData.descuento_aplicado,
+  isWeekend: isWknd
+}));
               setShowBookingFormModal(true);
               showToast('Datos de cotización cargados en el formulario');
               clearInitialData();
@@ -1241,38 +1266,90 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
             showToast('Archivo de reservas descargado');
           };
 
+const handleSyncOccupiedDates = async () => {
+  if (!window.confirm('¿Sincronizar todas las reservas actuales con fechas_ocupadas?')) return;
+
+  try {
+    const validBookings = bookings.filter(b => b._fechaStr);
+
+    await Promise.all(validBookings.map(b => 
+      setDoc(doc(db, 'fechas_ocupadas', b._fechaStr), {
+        fecha: b._fechaStr,
+        status: 'ocupada',
+        reservacionId: b.id,
+        origen: b.origen || b._origen || 'admin',
+        updatedAt: new Date().toISOString()
+      }, { merge: true })
+    ));
+
+    showToast(`Se sincronizaron ${validBookings.length} fechas ocupadas`);
+  } catch (err) {
+    console.error(err);
+    showToast('Error al sincronizar fechas ocupadas: ' + err.message, 'error');
+  }
+};
+
           const handleBlockDate = async (e) => {
-            e.preventDefault();
-            if (!form.date) return showToast('Selecciona una fecha', 'error');
+  e.preventDefault();
+  if (!form.date) return showToast('Selecciona una fecha', 'error');
 
-            const isDateAlreadyBooked = bookings.some(b => b._fechaStr === form.date);
-            if (isDateAlreadyBooked) return showToast('⚠️ ¡Alto! Esta fecha ya está reservada o bloqueada.', 'error');
+  const isDateAlreadyBooked = bookings.some(b => b._fechaStr === form.date);
+  if (isDateAlreadyBooked) return showToast('⚠️ ¡Alto! Esta fecha ya está reservada o bloqueada.', 'error');
 
-            const anticipoNum = Number(form.anticipo) || 0;
-            const newStatus = anticipoNum > 0 ? 'Anticipado' : 'Pendiente';
+  const anticipoNum = Number(form.anticipo) || 0;
+  const newStatus = anticipoNum > 0 ? 'Anticipado' : 'Pendiente';
 
-            try {
-              await setDoc(doc(db, 'reservaciones', form.date), { 
-                date: form.date, 
-                status: newStatus,
-                base_event_total: calculatedTotal,
-                extras: [],
-                extras_total: 0,
-                precio_total: calculatedTotal,
-                anticipo: anticipoNum,
-                depto_incluido: form.includesDepto,
-                cliente_nombre: form.name || 'Bloqueo Interno',
-                cliente_telefono: form.phone || '',
-                cliente_correo: form.email || '',
-                descuento_aplicado: form.discount || 0,
-                origen: 'hub_interno',
-                timestamp: new Date().toISOString()
-              });
-              showToast(anticipoNum > 0 ? 'Fecha reservada' : 'Fecha bloqueada');
-              setForm({ date: '', name: '', phone: '', email: '', isWeekend: false, includesDepto: false, discount: 0, anticipo: '' });
-              setShowBookingFormModal(false);
-            } catch(err) { console.error(err); showToast('Error al bloquear', 'error'); }
-          };
+  try {
+    await setDoc(doc(db, 'reservaciones', form.date), { 
+      date: form.date, 
+      status: newStatus,
+      base_event_total: calculatedTotal,
+      extras: [],
+      extras_total: 0,
+      precio_total: calculatedTotal,
+      anticipo: anticipoNum,
+      depto_incluido: form.includesDepto,
+      cliente_nombre: form.name || 'Bloqueo Interno',
+      cliente_telefono: form.phone || '',
+      cliente_correo: form.email || '',
+      tipo_evento: form.type || '',
+      horario_inicio: form.startTime || '',
+      horario_fin: form.endTime || '',
+      descuento_aplicado: form.discount || 0,
+      origen: 'hub_interno',
+      timestamp: new Date().toISOString()
+    });
+
+    await setDoc(doc(db, 'fechas_ocupadas', form.date), {
+      fecha: form.date,
+      status: 'ocupada',
+      reservacionId: form.date,
+      origen: 'admin',
+      updatedAt: new Date().toISOString()
+    });
+
+    showToast(anticipoNum > 0 ? 'Fecha reservada' : 'Fecha bloqueada');
+
+    setForm({
+      date: '',
+      name: '',
+      phone: '',
+      email: '',
+      type: '',
+      startTime: '',
+      endTime: '',
+      isWeekend: false,
+      includesDepto: false,
+      discount: 0,
+      anticipo: ''
+    });
+
+    setShowBookingFormModal(false);
+  } catch(err) {
+    console.error(err);
+    showToast('Error al bloquear', 'error');
+  }
+};
           const handleConvertWebRequestToBooking = async (request) => {
   if (!request || !request.fecha) {
     return showToast('La solicitud no tiene fecha válida', 'error');
@@ -1316,6 +1393,15 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
       timestamp: new Date().toISOString(),
       createdBy: activeProfile?.name || 'Admin'
     });
+
+await setDoc(doc(db, 'fechas_ocupadas', request.fecha), {
+  fecha: request.fecha,
+  status: 'ocupada',
+  reservacionId: request.fecha,
+  solicitudWebId: request.id,
+  origen: 'web_publica',
+  updatedAt: new Date().toISOString()
+});
 
     await updateDoc(doc(db, 'solicitudes_reserva', request.id), {
       status: 'convertida',
@@ -1378,6 +1464,7 @@ const handleDiscardWebRequest = async (request) => {
             if (!bookingToFree) return;
             try {
               await deleteDoc(doc(db, 'reservaciones', bookingToFree.id)); 
+              await deleteDoc(doc(db, 'fechas_ocupadas', bookingToFree._fechaStr || bookingToFree.id));
               showToast('Fecha liberada');
               setBookingToFree(null); 
             } catch(err) { console.error(err); showToast('Error al liberar', 'error'); }
@@ -1403,8 +1490,11 @@ const handleDiscardWebRequest = async (request) => {
                 cliente_nombre: editingBooking.cliente_nombre,
                 cliente_telefono: editingBooking.cliente_telefono || '',
                 cliente_correo: editingBooking.cliente_correo || '',
-                date: editingBooking.date, 
-                base_event_total: baseTotal,
+tipo_evento: editingBooking.tipo_evento || '',
+horario_inicio: editingBooking.horario_inicio || '',
+horario_fin: editingBooking.horario_fin || '',
+date: editingBooking.date, 
+base_event_total: baseTotal,
                 extras,
                 extras_total: extrasTotal,
                 precio_total: total,
@@ -1519,9 +1609,123 @@ const handleDiscardWebRequest = async (request) => {
 
             const enlaceCorreo = `mailto:${correo}?subject=${asunto}&body=${encodeURIComponent(cuerpo)}`;
             window.open(enlaceCorreo, '_blank');
-          };
+};
+const formatDateForContract = (dateStr) => {
+  if (!dateStr || !dateStr.includes('-')) return '[Fecha]';
+  const parts = dateStr.split('-');
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+};
 
-          return (
+const handleGenerateContractFromBooking = (booking) => {
+  if (!booking) return;
+
+  const nombre = booking._nombreStr || booking.cliente_nombre || '[Nombre del cliente]';
+  const fecha = formatDateForContract(booking._fechaStr || booking.date);
+  const telefono = booking._telefonoStr || booking.cliente_telefono || '';
+  const correo = booking._correoStr || booking.cliente_correo || '';
+  const total = Number(booking._precioTotal || booking.precio_total || 0);
+  const anticipo = Number(booking._anticipo || booking.anticipo || 0);
+  const saldo = Math.max(0, total - anticipo);
+  const incluyeDepto = booking.depto_incluido === true;
+const tipoEvento = booking.tipo_evento || booking.type || '[tipo de evento]';
+const horarioInicio = booking.horario_inicio || booking.startTime || '[hora de inicio]';
+const horarioFin = booking.horario_fin || booking.endTime || '[hora de salida]';
+  const extras = normalizeBookingExtras(booking.extras || booking._extras);
+  const extrasTotal = Number(booking.extras_total || booking._extrasTotal || calculateExtrasTotal(extras)) || 0;
+  const baseTotal = Number(booking.base_event_total ?? booking._baseEventTotal ?? Math.max(0, total - extrasTotal)) || 0;
+
+  const today = new Date();
+  const todayStr = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+
+  let costBreakdown = '';
+  costBreakdown += `Renta base del espacio: $${baseTotal.toLocaleString('es-MX')} MXN\n`;
+
+  if (incluyeDepto) {
+    costBreakdown += `Incluye departamento privado: Sí\n`;
+  } else {
+    costBreakdown += `Incluye departamento privado: No\n`;
+  }
+
+  if (extras.length > 0 && extrasTotal > 0) {
+    costBreakdown += `\nExtras del evento:\n`;
+    extras.forEach(extra => {
+      costBreakdown += `• ${extra.concepto}: ${extra.cantidad} x $${Number(extra.precio_unitario || 0).toLocaleString('es-MX')} = $${Number(extra.total || 0).toLocaleString('es-MX')} MXN\n`;
+    });
+  }
+
+  const text = `*CONTRATO DE RENTA DE ESPACIO "CASA COPAL"* 🌿
+FECHA DE ELABORACIÓN: ${todayStr}
+
+*1. LAS PARTES*
+Arrendador: Casa Copal Eventos
+Cliente: ${nombre}
+Teléfono: ${telefono || '[Teléfono]'}
+Correo: ${correo || '[Correo]'}
+
+*2. DETALLES DEL EVENTO*
+Fecha del evento: ${fecha}
+Horario: De ${horarioInicio} a ${horarioFin} hrs.
+Tipo de evento: ${tipoEvento}
+Máximo invitados: 50 personas.
+Espacio reservado: ${incluyeDepto ? 'Salón Principal + Departamento Privado' : 'Salón Principal'}
+
+*3. FINANZAS*
+${costBreakdown.trim()}
+
+*TOTAL A PAGAR:* $${total.toLocaleString('es-MX')} MXN
+*ANTICIPO RECIBIDO:* $${anticipo.toLocaleString('es-MX')} MXN
+*SALDO A LIQUIDAR:* $${saldo.toLocaleString('es-MX')} MXN
+
+*DEPÓSITO EN GARANTÍA:* $1,500 MXN
+El depósito en garantía es reembolsable después del evento, siempre que no existan daños, incumplimientos o cargos pendientes.
+
+*4. CONDICIONES DE USO Y GARANTÍA*
+El depósito de $1,500 MXN podrá no ser devuelto total o parcialmente en los siguientes casos:
+A) Ruido excesivo fuera del horario permitido.
+B) Ingresar botellas, vasos u objetos de vidrio al área de alberca.
+C) Daños al mobiliario, instalaciones, cerraduras, equipo o decoración del lugar.
+D) Uso de pirotecnia, confeti metálico o elementos que dañen o ensucien excesivamente el espacio.
+E) Dejar asador encendido, refrigerador sucio, basura fuera de su lugar o áreas en condiciones inadecuadas.
+
+*5. CANCELACIONES*
+Cancelaciones con menos de 6 días de anticipación no son reembolsables.
+
+*6. CONFIRMACIÓN*
+Para confirmar que acepta las condiciones de renta de Casa Copal, favor de responder a este mensaje con la frase:
+
+*"Acepto términos y condiciones"*`;
+
+  setContractPreview({
+    title: `Contrato - ${nombre} - ${booking._fechaStr || booking.date || ''}`,
+    text
+  });
+};
+
+const handleCopyContractPreview = () => {
+  if (!contractPreview?.text) return;
+
+  try {
+    const textArea = document.createElement("textarea");
+    textArea.value = contractPreview.text;
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.position = "fixed";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textArea);
+
+    if (successful) showToast('Contrato copiado al portapapeles');
+    else showToast('Error al copiar contrato', 'error');
+  } catch (err) {
+    showToast('Error al copiar contrato', 'error');
+  }
+};
+
+return (
+
             <div className="animate-fade-in space-y-6">
               <div className="flex justify-between items-end">
                 <div>
@@ -1538,6 +1742,11 @@ const handleDiscardWebRequest = async (request) => {
                         <FileSpreadsheet className="w-4 h-4"/> Descargar a Excel
                       </button>
                     )}
+{canViewBookingFinancials && (
+  <button onClick={handleSyncOccupiedDates} className="bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2">
+    <i className="fa-solid fa-rotate"></i> Sincronizar fechas
+  </button>
+)}
                   </div>
                 )}
               </div>
@@ -1733,7 +1942,21 @@ const handleDiscardWebRequest = async (request) => {
                                 const bookingExtras = normalizeBookingExtras(b.extras || b._extras);
                                 const bookingExtrasTotal = Number(b.extras_total || b._extrasTotal || calculateExtrasTotal(bookingExtras)) || 0;
                                 const bookingBaseTotal = Number(b.base_event_total ?? b._baseEventTotal ?? Math.max(0, b._precioTotal - bookingExtrasTotal)) || 0;
-                                setEditingBooking({...b, date: b._fechaStr, cliente_nombre: b._nombreStr, cliente_telefono: b._telefonoStr, cliente_correo: b._correoStr, base_event_total: bookingBaseTotal, extras: bookingExtras, extras_total: bookingExtrasTotal, precio_total: b._precioTotal, anticipo: b._anticipo});
+                                setEditingBooking({
+  ...b,
+  date: b._fechaStr,
+  cliente_nombre: b._nombreStr,
+  cliente_telefono: b._telefonoStr,
+  cliente_correo: b._correoStr,
+  tipo_evento: b.tipo_evento || b.type || '',
+  horario_inicio: b.horario_inicio || b.startTime || '',
+  horario_fin: b.horario_fin || b.endTime || '',
+  base_event_total: bookingBaseTotal,
+  extras: bookingExtras,
+  extras_total: bookingExtrasTotal,
+  precio_total: b._precioTotal,
+  anticipo: b._anticipo
+});
                               }} className="w-10 h-10 bg-slate-200 text-slate-700 hover:bg-emerald-100 hover:text-emerald-700 rounded-full transition-colors flex items-center justify-center shadow-md mx-auto" title="Editar Reserva">
                                 <i className="fa-solid fa-pen text-base"></i>
                               </button>
@@ -1805,6 +2028,14 @@ const handleDiscardWebRequest = async (request) => {
                                 ) : (
                                   <button onClick={() => handleApproveWebBooking(b.id)} className="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-full hover:bg-emerald-600 transition-colors shadow-md flex items-center gap-1.5"><i className="fa-solid fa-check"></i> Aprobar</button>
                                 )}
+{canViewBookingFinancials && (
+  <button
+    onClick={() => handleGenerateContractFromBooking(b)}
+    className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-full hover:bg-indigo-700 transition-colors shadow-md flex items-center gap-1.5"
+  >
+    <i className="fa-solid fa-file-signature"></i> Contrato
+  </button>
+)}
                                 {(status === 'Anticipado' || status === 'Pendiente') && (
                                   <button onClick={() => setBookingToFree(b)} className="text-[10px] text-rose-400 hover:text-rose-600 font-bold hover:underline transition-colors mt-2">Liberar Fecha</button>
                                 )}
@@ -1863,6 +2094,36 @@ const handleDiscardWebRequest = async (request) => {
                           <input type="number" min="0" max="100" placeholder="0" className="w-full p-3 bg-blue-50 border border-blue-200 text-blue-700 font-black rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm" value={form.discount || ''} onChange={e => setForm({...form, discount: e.target.value})} />
                         </div>
                       </div>
+<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+  <div>
+    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Tipo de evento</label>
+    <input
+      type="text"
+      placeholder="Ej. Cumpleaños"
+      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700"
+      value={form.type}
+      onChange={e => setForm({...form, type: e.target.value})}
+    />
+  </div>
+  <div>
+    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Hora inicio</label>
+    <input
+      type="time"
+      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700"
+      value={form.startTime}
+      onChange={e => setForm({...form, startTime: e.target.value})}
+    />
+  </div>
+  <div>
+    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Hora salida</label>
+    <input
+      type="time"
+      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700"
+      value={form.endTime}
+      onChange={e => setForm({...form, endTime: e.target.value})}
+    />
+  </div>
+</div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <label className="flex items-center gap-3 text-sm font-bold cursor-pointer text-slate-700 bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl w-full">
@@ -1908,6 +2169,36 @@ const handleDiscardWebRequest = async (request) => {
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Teléfono</label><input type="tel" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={editingBooking.cliente_telefono} onChange={e => setEditingBooking({...editingBooking, cliente_telefono: e.target.value})} /></div>
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Correo (Opcional)</label><input type="email" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={editingBooking.cliente_correo || ''} onChange={e => setEditingBooking({...editingBooking, cliente_correo: e.target.value})} /></div>
                       </div>
+<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+  <div>
+    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Tipo de evento</label>
+    <input
+      type="text"
+      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700"
+      value={editingBooking.tipo_evento || ''}
+      onChange={e => setEditingBooking({...editingBooking, tipo_evento: e.target.value})}
+      placeholder="Ej. Cumpleaños"
+    />
+  </div>
+  <div>
+    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Hora inicio</label>
+    <input
+      type="time"
+      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700"
+      value={editingBooking.horario_inicio || ''}
+      onChange={e => setEditingBooking({...editingBooking, horario_inicio: e.target.value})}
+    />
+  </div>
+  <div>
+    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Hora salida</label>
+    <input
+      type="time"
+      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700"
+      value={editingBooking.horario_fin || ''}
+      onChange={e => setEditingBooking({...editingBooking, horario_fin: e.target.value})}
+    />
+  </div>
+</div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Total base ($)</label><input type="number" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-black text-slate-800" value={editingBooking.base_event_total || 0} onChange={e => { const base = Number(e.target.value) || 0; const extrasTotal = calculateExtrasTotal(editingBooking.extras || []); setEditingBooking({...editingBooking, base_event_total: e.target.value, precio_total: base + extrasTotal}); }} required/></div>
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Extras ($)</label><input type="text" readOnly className="w-full p-3 bg-blue-50 border border-blue-100 rounded-xl outline-none font-black text-blue-700" value={`$${calculateExtrasTotal(editingBooking.extras || []).toLocaleString()}`} /></div>
@@ -1970,6 +2261,42 @@ const handleDiscardWebRequest = async (request) => {
                   </div>
                 </div>
               )}
+{contractPreview && canManageBookings && (
+  <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
+    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] flex flex-col">
+      <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
+        <div>
+          <h3 className="font-black text-xl text-slate-800">Contrato generado</h3>
+          <p className="text-xs text-slate-500 mt-1 font-bold">{contractPreview.title}</p>
+        </div>
+        <button onClick={() => setContractPreview(null)} className="w-8 h-8 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm">
+          <i className="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div className="p-6 overflow-y-auto space-y-4">
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-xs font-bold leading-relaxed">
+          Revisa y completa manualmente los datos que todavía no están guardados en la reserva, como horario y tipo de evento.
+        </div>
+
+        <textarea
+  value={contractPreview.text}
+  onChange={(e) => setContractPreview(prev => ({ ...prev, text: e.target.value }))}
+  className="w-full min-h-[420px] p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-700 font-medium resize-none outline-none whitespace-pre-wrap"
+></textarea>
+
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button onClick={() => setContractPreview(null)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 rounded-xl transition-colors">
+            Cerrar
+          </button>
+          <button onClick={handleCopyContractPreview} className="flex-1 py-3 bg-indigo-600 text-white font-bold hover:bg-indigo-700 rounded-xl transition-colors shadow-lg flex items-center justify-center gap-2">
+            <i className="fa-solid fa-copy"></i> Copiar contrato
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
               {canManageBookings && (
                 <button
                   type="button"
@@ -2508,8 +2835,8 @@ const handleDiscardWebRequest = async (request) => {
                       {generatedPost && ( <div className="mt-4 bg-white p-4 rounded-xl relative shadow-sm"><button onClick={()=>{handleCopyText(generatedPost); setCopiedPost(true); setTimeout(()=>setCopiedPost(false),2000);}} className="absolute top-3 right-3 text-xs bg-fuchsia-100 text-fuchsia-700 px-3 py-1.5 rounded-lg font-bold">{copiedPost ? '¡Copiado!' : 'Copiar'}</button><p className="text-sm whitespace-pre-wrap pr-20">{generatedPost}</p></div> )}
                   </div>
               </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-                <div className="bg-white p-6 rounded-3xl shadow-sm border h-fit">
+              <div className="grid grid-cols-1 gap-6 items-start">
+                <div className="hidden">
                   <div className="mb-6"><h3 className="font-black text-slate-800 text-xl">Generador de Contratos</h3></div>
                   <div className="space-y-4">
                     <input type="text" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" placeholder="Nombre Cliente" value={contractData.client} onChange={e=>setContractData({...contractData, client: e.target.value})}/>
@@ -2519,17 +2846,14 @@ const handleDiscardWebRequest = async (request) => {
                     <div className="grid grid-cols-2 gap-4"><input type="number" placeholder="Costo Salón" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.salon} onChange={e=>setContractData({...contractData, salon: e.target.value})}/><input type="number" placeholder="Costo Depto" className="w-full p-2.5 border rounded-lg bg-slate-50 text-sm" value={contractData.depto} onChange={e=>setContractData({...contractData, depto: e.target.value})}/></div>
                     <div className="grid grid-cols-2 gap-4"><input type="number" placeholder="Descuento (%)" className="w-full p-2.5 border rounded-lg bg-blue-50 text-blue-700 font-bold text-sm" value={contractData.discount} onChange={e=>setContractData({...contractData, discount: e.target.value})}/><input type="number" placeholder="Anticipo Recibido" className="w-full p-2.5 border rounded-lg bg-emerald-50 text-emerald-700 font-bold text-sm" value={contractData.deposit} onChange={e=>setContractData({...contractData, deposit: e.target.value})}/></div>
                     <button onClick={generateContract} className="w-full bg-slate-900 text-white font-bold py-3.5 mt-2 rounded-xl hover:bg-slate-800">Generar Contrato</button>
-                    <button onClick={handleCreateReservationFromContract} className="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-xl hover:bg-emerald-700 shadow-md shadow-emerald-100 flex items-center justify-center gap-2"><i className="fa-solid fa-calendar-check"></i> Crear reserva desde contrato</button>
-                    {contractReservationNotice && (
-                      <div className={`rounded-xl border px-4 py-3 text-sm font-bold leading-relaxed ${contractReservationNotice.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
-                        {contractReservationNotice.msg}
-                      </div>
-                    )}
-                    <p className="text-[10px] text-slate-400 font-bold leading-relaxed bg-slate-50 border border-slate-100 rounded-xl p-3">Este botón crea la reserva en Centro de Reservas usando la fecha del contrato. Si la fecha ya existe, no sobrescribe nada.</p>
+                      
+                    <p className="text-[10px] text-slate-500 font-bold leading-relaxed bg-slate-50 border border-slate-100 rounded-xl p-3">
+  Flujo recomendado: primero crea o confirma la reserva en Centro de Reservas. Después usa el contrato generado desde la reserva para enviarlo al cliente por WhatsApp.
+</p>
                   </div>
                 </div>
                 <div className="space-y-6 h-full flex flex-col">
-                  <div className="bg-white p-4 rounded-3xl shadow-sm border overflow-hidden">
+                  <div className="hidden">
                     <div className="flex justify-between items-center mb-2"><label className="font-bold">Contrato WhatsApp</label><button onClick={()=>{handleCopyText(generatedContract); setCopiedContract(true); setTimeout(()=>setCopiedContract(false),2000);}} className="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg">{copiedContract?'Copiado':'Copiar'}</button></div>
                     <textarea readOnly value={generatedContract} className="w-full min-h-[300px] p-4 bg-slate-50 text-sm resize-none outline-none"></textarea>
                   </div>
