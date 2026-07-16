@@ -144,6 +144,7 @@
           const [quotes, setQuotes] = useState([]); 
           const [quoteToConvert, setQuoteToConvert] = useState(null); 
           const [webRequests, setWebRequests] = useState([]);
+          const [dashboardYear, setDashboardYear] = useState(new Date().getFullYear());
 
           useEffect(() => {
             const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -450,26 +451,47 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
           const totalExpenses = useMemo(() => expenses.filter(e => e._status === 'Pagado' || !e._status).reduce((sum, e) => sum + e._monto, 0), [expenses]);
           const netProfit = totalIncome - totalExpenses;
 
+          const dashboardYears = useMemo(() => {
+            const years = new Set([new Date().getFullYear()]);
+
+            [...bookings, ...expenses].forEach(item => {
+              const dateStr = item._fechaStr || item.date || item.fecha || '';
+              if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                years.add(Number(dateStr.slice(0, 4)));
+              }
+            });
+
+            return Array.from(years).sort((a, b) => b - a);
+          }, [bookings, expenses]);
+
           const chartData = useMemo(() => {
             const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-            const data = months.map(name => ({ name, Ingresos: 0, PorCobrar: 0, Gastos: 0 }));
+            const data = months.map(name => ({ name, Reservas: 0, Bloqueos: 0, Ingresos: 0, PorCobrar: 0, Gastos: 0 }));
             
             bookings.forEach(b => {
-              if (b._status === 'Liquidado' || b._status === 'Anticipado' || b._status === 'Confirmada') {
-                let date;
-                if (b._fechaStr && b._fechaStr.includes('-')) {
-                    const p = b._fechaStr.split('-');
-                    date = new Date(p[0], p[1]-1, p[2]);
-                } else if (b.timestamp) {
-                    date = new Date(b.timestamp);
-                }
-                if (date && !isNaN(date.getMonth())) {
-                   const ingresoRecibido = b._status === 'Liquidado' ? b._precioTotal : b._anticipo;
-                   const pendientePorCobrar = b._status === 'Liquidado' ? 0 : Math.max(0, b._precioTotal - b._anticipo);
+              let date;
+              if (b._fechaStr && b._fechaStr.includes('-')) {
+                  const p = b._fechaStr.split('-');
+                  date = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+              } else if (b.timestamp) {
+                  date = new Date(b.timestamp);
+              }
 
-                   data[date.getMonth()].Ingresos += ingresoRecibido;
-                   data[date.getMonth()].PorCobrar += pendientePorCobrar;
-                }
+              if (!date || isNaN(date.getTime()) || date.getFullYear() !== Number(dashboardYear)) return;
+
+              const total = Number(b._precioTotal || 0);
+              const anticipo = Number(b._anticipo || 0);
+              const rawStatus = String(b._status || b.status || b.estado || '').trim().toLowerCase();
+              const isCourtesy = total === 0;
+              const isLiquidated = total > 0 && (anticipo >= total || rawStatus === 'liquidado' || rawStatus === 'pagado');
+              const isConfirmed = isCourtesy || isLiquidated || anticipo > 0;
+
+              if (isConfirmed) {
+                data[date.getMonth()].Reservas += 1;
+                data[date.getMonth()].Ingresos += isLiquidated ? total : anticipo;
+                data[date.getMonth()].PorCobrar += isLiquidated || isCourtesy ? 0 : Math.max(0, total - anticipo);
+              } else {
+                data[date.getMonth()].Bloqueos += 1;
               }
             });
 
@@ -478,17 +500,17 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
                 let date;
                 if (e._fechaStr && e._fechaStr.includes('-')) {
                     const p = e._fechaStr.split('-');
-                    date = new Date(p[0], p[1]-1, p[2]);
+                    date = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
                 } else if (e.timestamp) {
                     date = new Date(e.timestamp);
                 }
-                if (date && !isNaN(date.getMonth())) {
+                if (date && !isNaN(date.getTime()) && date.getFullYear() === Number(dashboardYear)) {
                   data[date.getMonth()].Gastos += e._monto;
                 }
               }
             });
             return data;
-          }, [bookings, expenses]);
+          }, [bookings, expenses, dashboardYear]);
 
           const displayBookings = useMemo(() => {
              const today = new Date().toISOString().split('T')[0];
@@ -628,7 +650,12 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
                         <StatCard title="Utilidad (Profit)" amount={netProfit} icon={<LayoutDashboard/>} color="text-blue-600 bg-blue-50 border-blue-100" />
                       </div>
 
-                      <DashboardChart data={chartData} />
+                      <DashboardChart 
+                        data={chartData} 
+                        selectedYear={dashboardYear}
+                        availableYears={dashboardYears}
+                        onYearChange={setDashboardYear}
+                      />
 
                       <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 mt-8">
                           <h3 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-100 pb-3">Próximos Eventos</h3>
@@ -693,25 +720,35 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
         // SUB-COMPONENTES 
         // ============================================================================
 
-        function DashboardChart({ data }) {
+        function DashboardChart({ data, selectedYear, availableYears, onYearChange }) {
           const maxVal = Math.max(...data.map(d => Math.max(d.Ingresos, d.Gastos)), 5000); 
           
           return (
             <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 mt-8">
-               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-8 gap-4">
+               <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end mb-8 gap-4">
                   <div>
                      <h3 className="text-xl font-black text-slate-800">Rendimiento Anual</h3>
-                     <p className="text-sm text-slate-500 font-medium">Comparativa mensual de ingresos recibidos, pendientes por cobrar, gastos, utilidad y margen.</p>
+                     <p className="text-sm text-slate-500 font-medium">Comparativa mensual de reservas confirmadas, ingresos recibidos, pendientes por cobrar, gastos y flujo neto.</p>
                   </div>
-                  <div className="flex gap-4 bg-slate-50 p-2 px-4 rounded-xl border border-slate-100">
-                     <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-emerald-400 shadow-sm"></div>
-                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Ingresos</span>
+                  <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+                     <div className="flex gap-4 bg-slate-50 p-2 px-4 rounded-xl border border-slate-100">
+                        <div className="flex items-center gap-2">
+                           <div className="w-3 h-3 rounded-full bg-emerald-400 shadow-sm"></div>
+                           <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Ingresos</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                           <div className="w-3 h-3 rounded-full bg-rose-400 shadow-sm"></div>
+                           <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Gastos</span>
+                        </div>
                      </div>
-                     <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-rose-400 shadow-sm"></div>
-                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Gastos</span>
-                     </div>
+                     <select
+                       value={selectedYear}
+                       onChange={e => onYearChange(Number(e.target.value))}
+                       className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-black text-slate-700 outline-none focus:border-emerald-500"
+                       aria-label="Año del dashboard"
+                     >
+                       {availableYears.map(year => <option key={year} value={year}>Año {year}</option>)}
+                     </select>
                   </div>
                </div>
                
@@ -724,11 +761,13 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
                     
                     return (
                      <div key={i} className="flex-1 flex flex-col items-center gap-3 group relative h-full">
-                        <div className="opacity-0 group-hover:opacity-100 absolute -top-32 bg-slate-900 text-white text-[10px] font-bold p-2.5 rounded-xl pointer-events-none transition-opacity whitespace-nowrap z-10 shadow-xl border border-slate-700">
-                           <div className="flex justify-between gap-4"><span className="text-emerald-400">Recibido:</span> <span>${d.Ingresos.toLocaleString()}</span></div>
+                        <div className="opacity-0 group-hover:opacity-100 absolute -top-44 bg-slate-900 text-white text-[10px] font-bold p-2.5 rounded-xl pointer-events-none transition-opacity whitespace-nowrap z-10 shadow-xl border border-slate-700">
+                           <div className="flex justify-between gap-4"><span className="text-white">Reservas:</span> <span>{d.Reservas}</span></div>
+                           <div className="flex justify-between gap-4 mt-1"><span className="text-amber-300">Bloqueos:</span> <span>{d.Bloqueos}</span></div>
+                           <div className="flex justify-between gap-4 mt-1 border-t border-slate-700 pt-1"><span className="text-emerald-400">Recibido:</span> <span>${d.Ingresos.toLocaleString()}</span></div>
                            <div className="flex justify-between gap-4 mt-1"><span className="text-amber-400">Por cobrar:</span> <span>${d.PorCobrar.toLocaleString()}</span></div>
                            <div className="flex justify-between gap-4 mt-1"><span className="text-rose-400">Gastos:</span> <span>${d.Gastos.toLocaleString()}</span></div>
-                           <div className="flex justify-between gap-4 mt-1 border-t border-slate-700 pt-1"><span className={utilidad >= 0 ? "text-blue-400" : "text-orange-400"}>Utilidad:</span> <span>{utilidad < 0 ? '-' : ''}${Math.abs(utilidad).toLocaleString()}</span></div>
+                           <div className="flex justify-between gap-4 mt-1 border-t border-slate-700 pt-1"><span className={utilidad >= 0 ? "text-blue-400" : "text-orange-400"}>Flujo neto:</span> <span>{utilidad < 0 ? '-' : ''}${Math.abs(utilidad).toLocaleString()}</span></div>
                            <div className="flex justify-between gap-4 mt-1"><span className="text-slate-300">Margen:</span> <span>{d.Ingresos > 0 ? `${margen.toFixed(1)}%` : '0%'}</span></div>
                         </div>
                         
@@ -1116,6 +1155,8 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
           const [bookingToLiquidate, setBookingToLiquidate] = useState(null);
           const [bookingSearchTerm, setBookingSearchTerm] = useState('');
           const [bookingStatusFilter, setBookingStatusFilter] = useState('Todos');
+          const [bookingMonthFilter, setBookingMonthFilter] = useState('Todos');
+          const [bookingYearFilter, setBookingYearFilter] = useState('Todos');
           const [showBookingFormModal, setShowBookingFormModal] = useState(false);
           const [contractPreview, setContractPreview] = useState(null);
           
@@ -1185,9 +1226,8 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
             if (anticipo >= total && total > 0) return 'Liquidado';
             if (anticipo > 0) return 'Anticipado';
             if (rawStatus === 'liquidado' || rawStatus === 'pagado' || rawStatus === 'cortesía' || rawStatus === 'cortesia') return 'Liquidado';
-            if (rawStatus === 'anticipado' || rawStatus === 'confirmada' || rawStatus === 'confirmado') return 'Anticipado';
 
-            // Cualquier solicitud web, bloqueo interno o registro sin pago se considera pendiente para filtros.
+            // Una fecha sin anticipo sigue siendo bloqueo temporal, aunque algún registro antiguo diga "Confirmada".
             return 'Pendiente';
           };
 
@@ -1201,12 +1241,26 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
             return 'Hub';
           };
 
+          const bookingYears = useMemo(() => {
+            const years = new Set();
+            bookings.forEach(b => {
+              if (/^\d{4}-\d{2}-\d{2}$/.test(b._fechaStr || '')) years.add(b._fechaStr.slice(0, 4));
+            });
+            return Array.from(years).sort((a, b) => Number(b) - Number(a));
+          }, [bookings]);
+
           const filteredBookings = useMemo(() => {
             const term = bookingSearchTerm.trim().toLowerCase();
             return bookings.filter(b => {
               const status = normalizeBookingStatus(b);
+              const dateParts = String(b._fechaStr || '').split('-');
+              const bookingYear = dateParts[0] || '';
+              const bookingMonth = dateParts[1] || '';
               const matchesStatus = bookingStatusFilter === 'Todos' || status === bookingStatusFilter;
-              if (!matchesStatus) return false;
+              const matchesYear = bookingYearFilter === 'Todos' || bookingYear === bookingYearFilter;
+              const matchesMonth = bookingMonthFilter === 'Todos' || bookingMonth === bookingMonthFilter;
+
+              if (!matchesStatus || !matchesYear || !matchesMonth) return false;
               if (!term) return true;
 
               const searchText = [
@@ -1229,7 +1283,41 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
 
               return searchText.includes(term);
             });
-          }, [bookings, bookingSearchTerm, bookingStatusFilter, canViewBookingFinancials]);
+          }, [bookings, bookingSearchTerm, bookingStatusFilter, bookingMonthFilter, bookingYearFilter, canViewBookingFinancials]);
+
+          const filteredBookingSummary = useMemo(() => {
+            return filteredBookings.reduce((summary, booking) => {
+              const total = Number(booking._precioTotal || 0);
+              const anticipo = Number(booking._anticipo || 0);
+              const status = normalizeBookingStatus(booking);
+              const isCourtesy = total === 0;
+              const isLiquidated = status === 'Liquidado' && total > 0;
+              const isConfirmed = isCourtesy || isLiquidated || (status === 'Anticipado' && anticipo > 0);
+
+              if (!isConfirmed) {
+                summary.temporaryBlocks += 1;
+                return summary;
+              }
+
+              summary.confirmedReservations += 1;
+              summary.contractedTotal += total;
+
+              if (isLiquidated) {
+                summary.receivedTotal += total;
+              } else if (!isCourtesy) {
+                summary.receivedTotal += anticipo;
+                summary.pendingBalance += Math.max(0, total - anticipo);
+              }
+
+              return summary;
+            }, {
+              confirmedReservations: 0,
+              temporaryBlocks: 0,
+              contractedTotal: 0,
+              receivedTotal: 0,
+              pendingBalance: 0
+            });
+          }, [filteredBookings]);
 
           const handleExportReservationsToCSV = () => {
             if (bookings.length === 0) {
@@ -1769,8 +1857,8 @@ return (
               )}
 
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
-                <div className="flex flex-col lg:flex-row gap-4 lg:items-end lg:justify-between">
-                  <div className="flex-1">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 items-end">
+                  <div className="md:col-span-2 xl:col-span-2">
                     <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5">Buscar reserva</label>
                     <div className="relative">
                       <i className="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
@@ -1783,7 +1871,40 @@ return (
                       />
                     </div>
                   </div>
-                  <div className="w-full lg:w-56">
+                  <div>
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5">Año</label>
+                    <select
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700"
+                      value={bookingYearFilter}
+                      onChange={e => setBookingYearFilter(e.target.value)}
+                    >
+                      <option value="Todos">Todos los años</option>
+                      {bookingYears.map(year => <option key={year} value={year}>{year}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5">Mes</label>
+                    <select
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700"
+                      value={bookingMonthFilter}
+                      onChange={e => setBookingMonthFilter(e.target.value)}
+                    >
+                      <option value="Todos">Todos los meses</option>
+                      <option value="01">Enero</option>
+                      <option value="02">Febrero</option>
+                      <option value="03">Marzo</option>
+                      <option value="04">Abril</option>
+                      <option value="05">Mayo</option>
+                      <option value="06">Junio</option>
+                      <option value="07">Julio</option>
+                      <option value="08">Agosto</option>
+                      <option value="09">Septiembre</option>
+                      <option value="10">Octubre</option>
+                      <option value="11">Noviembre</option>
+                      <option value="12">Diciembre</option>
+                    </select>
+                  </div>
+                  <div>
                     <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5">Estado</label>
                     <select
                       className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700"
@@ -1796,17 +1917,45 @@ return (
                       <option value="Liquidado">Liquidado</option>
                     </select>
                   </div>
-                  <div className="flex items-center justify-between lg:justify-end gap-3">
-                    <div className="text-xs font-bold text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 whitespace-nowrap">
-                      Mostrando <span className="text-slate-900 font-black">{filteredBookings.length}</span> de <span className="text-slate-900 font-black">{bookings.length}</span>
-                    </div>
-                    {(bookingSearchTerm || bookingStatusFilter !== 'Todos') && (
-                      <button type="button" onClick={() => { setBookingSearchTerm(''); setBookingStatusFilter('Todos'); }} className="text-xs font-black text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-100 rounded-xl px-4 py-3 transition-colors whitespace-nowrap">
-                        Limpiar
-                      </button>
-                    )}
-                  </div>
                 </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4 pt-4 border-t border-slate-100">
+                  <div className="text-xs font-bold text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 w-fit">
+                    Mostrando <span className="text-slate-900 font-black">{filteredBookings.length}</span> de <span className="text-slate-900 font-black">{bookings.length}</span>
+                  </div>
+                  {(bookingSearchTerm || bookingStatusFilter !== 'Todos' || bookingMonthFilter !== 'Todos' || bookingYearFilter !== 'Todos') && (
+                    <button type="button" onClick={() => { setBookingSearchTerm(''); setBookingStatusFilter('Todos'); setBookingMonthFilter('Todos'); setBookingYearFilter('Todos'); }} className="text-xs font-black text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-100 rounded-xl px-4 py-3 transition-colors whitespace-nowrap w-fit">
+                      Limpiar filtros
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className={`grid grid-cols-2 ${canViewBookingFinancials ? 'lg:grid-cols-5' : 'lg:grid-cols-2'} gap-4`}>
+                <div className="bg-white border border-emerald-100 rounded-2xl p-4 shadow-sm">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Reservas confirmadas</p>
+                  <p className="text-3xl font-black text-slate-800 mt-1">{filteredBookingSummary.confirmedReservations}</p>
+                </div>
+                <div className="bg-white border border-amber-100 rounded-2xl p-4 shadow-sm">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-amber-600">Bloqueos temporales</p>
+                  <p className="text-3xl font-black text-slate-800 mt-1">{filteredBookingSummary.temporaryBlocks}</p>
+                </div>
+                {canViewBookingFinancials && (
+                  <>
+                    <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Total contratado</p>
+                      <p className="text-xl font-black text-slate-800 mt-1">${filteredBookingSummary.contractedTotal.toLocaleString('es-MX')}</p>
+                    </div>
+                    <div className="bg-white border border-emerald-100 rounded-2xl p-4 shadow-sm">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Cobrado</p>
+                      <p className="text-xl font-black text-emerald-700 mt-1">${filteredBookingSummary.receivedTotal.toLocaleString('es-MX')}</p>
+                    </div>
+                    <div className="bg-white border border-rose-100 rounded-2xl p-4 shadow-sm">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-rose-600">Por cobrar</p>
+                      <p className="text-xl font-black text-rose-700 mt-1">${filteredBookingSummary.pendingBalance.toLocaleString('es-MX')}</p>
+                    </div>
+                  </>
+                )}
               </div>
 
              {canManageBookings && webRequests.length > 0 && (
