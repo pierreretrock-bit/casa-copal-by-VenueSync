@@ -37,7 +37,7 @@
         import { createRoot } from 'react-dom/client';
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
-        import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, getDoc, setDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+        import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, getDoc, setDoc, runTransaction } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
         import { LayoutDashboard, CalendarDays, WalletCards, Users, Megaphone, PlusCircle, LogOut, CheckCircle2, AlertCircle, TrendingUp, FileText, Copy, Smartphone, Download, UserCircle, Settings, Lock, Sparkles, Loader2, FileSpreadsheet } from 'lucide-react';
 
         // ============================================================================
@@ -1567,39 +1567,143 @@ const handleDiscardWebRequest = async (request) => {
             e.preventDefault();
             if (!editingBooking) return;
 
+            const newDate = String(editingBooking.date || '').trim();
+            const originalDate = String(editingBooking.originalDate || editingBooking._fechaStr || editingBooking.id || '').trim();
+            const originalReservationId = String(editingBooking.id || originalDate).trim();
+
+            if (!newDate) {
+              return showToast('Selecciona una fecha válida para el evento', 'error');
+            }
+
             const extras = normalizeBookingExtras(editingBooking.extras || []);
             const extrasTotal = calculateExtrasTotal(extras);
             const baseTotal = Number(editingBooking.base_event_total || 0);
             const total = baseTotal + extrasTotal;
-            const anticipo = Number(editingBooking.anticipo);
+            const anticipo = Number(editingBooking.anticipo) || 0;
+            const dateChanged = newDate !== originalDate;
             
             let newStatus = 'Pendiente';
             if (total === 0) newStatus = 'Liquidado'; 
             else if (anticipo >= total && total > 0) newStatus = 'Liquidado';
             else if (anticipo > 0) newStatus = 'Anticipado';
 
-            try {
-              await updateDoc(doc(db, 'reservaciones', editingBooking.id), { 
-                cliente_nombre: editingBooking.cliente_nombre,
-                cliente_telefono: editingBooking.cliente_telefono || '',
-                cliente_correo: editingBooking.cliente_correo || '',
-tipo_evento: editingBooking.tipo_evento || '',
-horario_inicio: editingBooking.horario_inicio || '',
-horario_fin: editingBooking.horario_fin || '',
-date: editingBooking.date, 
-base_event_total: baseTotal,
-                extras,
-                extras_total: extrasTotal,
-                precio_total: total,
-                anticipo: anticipo,
-                status: newStatus,
-                depto_incluido: editingBooking.depto_incluido || false
+            const editableFields = {
+              cliente_nombre: editingBooking.cliente_nombre,
+              cliente_telefono: editingBooking.cliente_telefono || '',
+              cliente_correo: editingBooking.cliente_correo || '',
+              tipo_evento: editingBooking.tipo_evento || '',
+              horario_inicio: editingBooking.horario_inicio || '',
+              horario_fin: editingBooking.horario_fin || '',
+              date: newDate,
+              base_event_total: baseTotal,
+              extras,
+              extras_total: extrasTotal,
+              precio_total: total,
+              anticipo,
+              status: newStatus,
+              depto_incluido: editingBooking.depto_incluido || false
+            };
+
+            if (dateChanged) {
+              const localConflict = bookings.some(booking => {
+                if (booking.id === originalReservationId) return false;
+                return booking.id === newDate || booking._fechaStr === newDate || booking.date === newDate;
               });
-              showToast('Reserva actualizada correctamente');
+
+              if (localConflict) {
+                return showToast('⚠️ La nueva fecha ya está reservada o bloqueada.', 'error');
+              }
+
+              const confirmed = window.confirm(
+                `¿Reprogramar esta reserva?\n\nFecha anterior: ${originalDate}\nNueva fecha: ${newDate}\n\nLa fecha anterior quedará disponible y se conservarán el precio, anticipo, extras y datos del cliente.`
+              );
+
+              if (!confirmed) return;
+            }
+
+            try {
+              if (!dateChanged) {
+                await updateDoc(doc(db, 'reservaciones', originalReservationId), editableFields);
+                showToast('Reserva actualizada correctamente');
+                setEditingBooking(null);
+                return;
+              }
+
+              await runTransaction(db, async (transaction) => {
+                const oldReservationRef = doc(db, 'reservaciones', originalReservationId);
+                const newReservationRef = doc(db, 'reservaciones', newDate);
+                const oldOccupiedRef = doc(db, 'fechas_ocupadas', originalDate || originalReservationId);
+                const newOccupiedRef = doc(db, 'fechas_ocupadas', newDate);
+
+                // Firestore exige realizar todas las lecturas antes de iniciar las escrituras.
+                const oldReservationSnap = await transaction.get(oldReservationRef);
+                const newReservationSnap = await transaction.get(newReservationRef);
+                const newOccupiedSnap = await transaction.get(newOccupiedRef);
+
+                if (!oldReservationSnap.exists()) {
+                  throw new Error('RESERVATION_NOT_FOUND');
+                }
+
+                if (newReservationSnap.exists() || newOccupiedSnap.exists()) {
+                  throw new Error('DATE_OCCUPIED');
+                }
+
+                const oldData = oldReservationSnap.data();
+                const now = new Date().toISOString();
+                const previousHistory = Array.isArray(oldData.historial_reprogramaciones)
+                  ? oldData.historial_reprogramaciones
+                  : [];
+
+                const updatedReservation = {
+                  ...oldData,
+                  ...editableFields,
+                  reprogramado_desde: originalDate,
+                  reprogramado_en: now,
+                  reprogramado_por: activeProfile?.name || activeProfile?.email || 'Admin',
+                  historial_reprogramaciones: [
+                    ...previousHistory,
+                    {
+                      fecha_anterior: originalDate,
+                      fecha_nueva: newDate,
+                      fecha_cambio: now,
+                      cambiado_por: activeProfile?.name || activeProfile?.email || 'Admin'
+                    }
+                  ]
+                };
+
+                transaction.set(newReservationRef, updatedReservation);
+                transaction.set(newOccupiedRef, {
+                  fecha: newDate,
+                  status: 'ocupada',
+                  reservacionId: newDate,
+                  origen: oldData.origen || editingBooking.origen || editingBooking._origen || 'admin',
+                  updatedAt: now,
+                  ...(oldData.solicitudWebId ? { solicitudWebId: oldData.solicitudWebId } : {})
+                });
+
+                if (oldData.solicitudWebId) {
+                  transaction.set(doc(db, 'solicitudes_reserva', oldData.solicitudWebId), {
+                    convertedToReservationId: newDate,
+                    reprogrammedAt: now,
+                    reprogrammedBy: activeProfile?.name || activeProfile?.email || 'Admin'
+                  }, { merge: true });
+                }
+
+                transaction.delete(oldReservationRef);
+                transaction.delete(oldOccupiedRef);
+              });
+
+              showToast(`Reserva reprogramada de ${originalDate} a ${newDate}`);
               setEditingBooking(null);
             } catch(err) {
               console.error(err);
-              showToast('Error al actualizar', 'error');
+              if (err.message === 'DATE_OCCUPIED') {
+                showToast('⚠️ La nueva fecha ya está reservada o bloqueada. No se realizaron cambios.', 'error');
+              } else if (err.message === 'RESERVATION_NOT_FOUND') {
+                showToast('No se encontró la reserva original. Actualiza la página y vuelve a intentarlo.', 'error');
+              } else {
+                showToast('Error al actualizar la reserva: ' + (err.message || 'Error desconocido'), 'error');
+              }
             }
           };
 
@@ -2099,6 +2203,7 @@ return (
                                 setEditingBooking({
   ...b,
   date: b._fechaStr,
+  originalDate: b._fechaStr,
   cliente_nombre: b._nombreStr,
   cliente_telefono: b._telefonoStr,
   cliente_correo: b._correoStr,
@@ -2314,11 +2419,19 @@ return (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
                   <div className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] overflow-y-auto">
                     <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center">
-                      <div><h3 className="font-black text-xl text-slate-800">Editar Reserva</h3><p className="text-xs text-slate-500 mt-1 font-bold">Fecha: {editingBooking.date || 'Sin asignar'}</p></div>
+                      <div><h3 className="font-black text-xl text-slate-800">Editar Reserva</h3><p className="text-xs text-slate-500 mt-1 font-bold">Reserva original: {editingBooking.originalDate || editingBooking.date || 'Sin asignar'}</p></div>
                       <button onClick={() => setEditingBooking(null)} className="w-8 h-8 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"><i className="fa-solid fa-xmark"></i></button>
                     </div>
                     <form onSubmit={handleUpdateBooking} className="p-6 space-y-4">
-                      <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Nombre del Cliente</label><input type="text" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={editingBooking.cliente_nombre} onChange={e => setEditingBooking({...editingBooking, cliente_nombre: e.target.value})} required/></div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Nombre del Cliente</label><input type="text" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={editingBooking.cliente_nombre} onChange={e => setEditingBooking({...editingBooking, cliente_nombre: e.target.value})} required/></div>
+                        <div><label className="block text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1.5">Fecha del evento</label><input type="date" className="w-full p-3 bg-emerald-50 border border-emerald-200 rounded-xl outline-none focus:border-emerald-500 font-black text-emerald-700" value={editingBooking.date || ''} onChange={e => setEditingBooking({...editingBooking, date: e.target.value})} required/></div>
+                      </div>
+                      {editingBooking.originalDate && editingBooking.date !== editingBooking.originalDate && (
+                        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-xs font-bold leading-relaxed">
+                          <i className="fa-solid fa-calendar-days mr-1"></i> Se reprogramará de <strong>{editingBooking.originalDate}</strong> a <strong>{editingBooking.date}</strong>. La tarifa y el anticipo no cambiarán automáticamente.
+                        </div>
+                      )}
                       <div className="grid grid-cols-2 gap-4">
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Teléfono</label><input type="tel" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={editingBooking.cliente_telefono} onChange={e => setEditingBooking({...editingBooking, cliente_telefono: e.target.value})} /></div>
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Correo (Opcional)</label><input type="email" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={editingBooking.cliente_correo || ''} onChange={e => setEditingBooking({...editingBooking, cliente_correo: e.target.value})} /></div>
