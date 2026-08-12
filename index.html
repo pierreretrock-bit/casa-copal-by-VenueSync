@@ -1148,6 +1148,8 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
   isWeekend: false,
   includesDepto: false,
   discount: 0,
+  costSalon: '',
+  costDepto: '',
   anticipo: ''
 });
           const [bookingToFree, setBookingToFree] = useState(null); 
@@ -1164,6 +1166,7 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
             if (initialData && canManageBookings) {
               const d = new Date(initialData.date + 'T12:00:00');
               const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+              const suggestedCosts = getSuggestedBookingCosts(initialData.date, initialData.depto_incluido, initialData.descuento_aplicado);
               setForm(prev => ({
   ...prev,
   date: initialData.date,
@@ -1175,6 +1178,8 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
   endTime: '',
   includesDepto: initialData.depto_incluido,
   discount: initialData.descuento_aplicado,
+  costSalon: suggestedCosts.salon,
+  costDepto: suggestedCosts.depto,
   isWeekend: isWknd
 }));
               setShowBookingFormModal(true);
@@ -1183,12 +1188,36 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
             }
           }, []);
 
+          const getSuggestedBookingCosts = (dateStr, includesDepto, discount = 0) => {
+            const date = dateStr ? new Date(dateStr + 'T12:00:00') : new Date();
+            const isWeekend = date.getDay() === 0 || date.getDay() === 5 || date.getDay() === 6;
+            const discountFactor = 1 - ((Number(discount) || 0) / 100);
+            const salon = Math.max(0, Math.round((isWeekend ? 5000 : 4000) * discountFactor));
+            const depto = includesDepto ? Math.max(0, Math.round((isWeekend ? 2000 : 1600) * discountFactor)) : 0;
+            return { salon, depto, isWeekend };
+          };
+
+          const getDateFromStoredValue = (value) => {
+            if (!value) return '';
+            if (typeof value === 'string') {
+              const isoMatch = value.match(/^(\d{4}-\d{2}-\d{2})/);
+              if (isoMatch) return isoMatch[1];
+              const parsed = new Date(value);
+              if (!isNaN(parsed.getTime())) return parsed.toISOString().split('T')[0];
+            }
+            if (typeof value === 'number') {
+              const parsed = new Date(value);
+              if (!isNaN(parsed.getTime())) return parsed.toISOString().split('T')[0];
+            }
+            if (typeof value?.toDate === 'function') {
+              try { return value.toDate().toISOString().split('T')[0]; } catch(e) {}
+            }
+            return '';
+          };
+
           const calculatedTotal = useMemo(() => {
-            let base = form.isWeekend ? 5000 : 4000;
-            let depto = form.isWeekend ? 2000 : 1600;
-            let subtotal = base + (form.includesDepto ? depto : 0);
-            return subtotal - (subtotal * ((form.discount || 0) / 100));
-          }, [form.isWeekend, form.includesDepto, form.discount]);
+            return Number(form.costSalon || 0) + (form.includesDepto ? Number(form.costDepto || 0) : 0);
+          }, [form.costSalon, form.costDepto, form.includesDepto]);
 
           const normalizeBookingExtras = (extras = []) => {
             if (!Array.isArray(extras)) return [];
@@ -1391,34 +1420,53 @@ const handleSyncOccupiedDates = async () => {
 
   const anticipoNum = Number(form.anticipo) || 0;
   const newStatus = anticipoNum > 0 ? 'Anticipado' : 'Pendiente';
+  const salonCost = Number(form.costSalon) || 0;
+  const deptoCost = form.includesDepto ? (Number(form.costDepto) || 0) : 0;
 
   try {
-    await setDoc(doc(db, 'reservaciones', form.date), { 
-      date: form.date, 
-      status: newStatus,
-      base_event_total: calculatedTotal,
-      extras: [],
-      extras_total: 0,
-      precio_total: calculatedTotal,
-      anticipo: anticipoNum,
-      depto_incluido: form.includesDepto,
-      cliente_nombre: form.name || 'Bloqueo Interno',
-      cliente_telefono: form.phone || '',
-      cliente_correo: form.email || '',
-      tipo_evento: form.type || '',
-      horario_inicio: form.startTime || '',
-      horario_fin: form.endTime || '',
-      descuento_aplicado: form.discount || 0,
-      origen: 'hub_interno',
-      timestamp: new Date().toISOString()
-    });
+    await runTransaction(db, async (transaction) => {
+      const reservationRef = doc(db, 'reservaciones', form.date);
+      const occupiedRef = doc(db, 'fechas_ocupadas', form.date);
 
-    await setDoc(doc(db, 'fechas_ocupadas', form.date), {
-      fecha: form.date,
-      status: 'ocupada',
-      reservacionId: form.date,
-      origen: 'admin',
-      updatedAt: new Date().toISOString()
+      const reservationSnap = await transaction.get(reservationRef);
+      const occupiedSnap = await transaction.get(occupiedRef);
+
+      if (reservationSnap.exists() || occupiedSnap.exists()) {
+        throw new Error('DATE_OCCUPIED');
+      }
+
+      const now = new Date().toISOString();
+
+      transaction.set(reservationRef, { 
+        date: form.date, 
+        status: newStatus,
+        fecha_contratacion: anticipoNum > 0 ? now.split('T')[0] : '',
+        costo_salon: salonCost,
+        costo_departamento: deptoCost,
+        base_event_total: calculatedTotal,
+        extras: [],
+        extras_total: 0,
+        precio_total: calculatedTotal,
+        anticipo: anticipoNum,
+        depto_incluido: form.includesDepto,
+        cliente_nombre: form.name || 'Bloqueo Interno',
+        cliente_telefono: form.phone || '',
+        cliente_correo: form.email || '',
+        tipo_evento: form.type || '',
+        horario_inicio: form.startTime || '',
+        horario_fin: form.endTime || '',
+        descuento_aplicado: form.discount || 0,
+        origen: 'hub_interno',
+        timestamp: now
+      });
+
+      transaction.set(occupiedRef, {
+        fecha: form.date,
+        status: 'ocupada',
+        reservacionId: form.date,
+        origen: 'admin',
+        updatedAt: now
+      });
     });
 
     showToast(anticipoNum > 0 ? 'Fecha reservada' : 'Fecha bloqueada');
@@ -1434,13 +1482,19 @@ const handleSyncOccupiedDates = async () => {
       isWeekend: false,
       includesDepto: false,
       discount: 0,
+      costSalon: '',
+      costDepto: '',
       anticipo: ''
     });
 
     setShowBookingFormModal(false);
   } catch(err) {
     console.error(err);
-    showToast('Error al bloquear', 'error');
+    if (err.message === 'DATE_OCCUPIED') {
+      showToast('⚠️ Esta fecha ya está reservada o bloqueada. No se realizaron cambios.', 'error');
+    } else {
+      showToast('Error al bloquear: ' + (err.message || 'Error desconocido'), 'error');
+    }
   }
 };
           const handleConvertWebRequestToBooking = async (request) => {
@@ -1457,56 +1511,79 @@ const handleSyncOccupiedDates = async () => {
 
   const anticipoNum = Number(anticipoInput) || 0;
   const newStatus = anticipoNum > 0 ? 'Anticipado' : 'Pendiente';
+  const requestTotal = Number(request.precio_total || 0);
+  const suggestedCosts = getSuggestedBookingCosts(request.fecha, request.depto_incluido || false, 0);
+  const requestDeptoCost = request.depto_incluido ? Math.min(suggestedCosts.depto, requestTotal) : 0;
+  const requestSalonCost = Math.max(0, requestTotal - requestDeptoCost);
 
   try {
-    const reservationRef = doc(db, 'reservaciones', request.fecha);
-    const existingReservation = await getDoc(reservationRef);
-
     const isDateAlreadyBookedLocal = bookings.some(b => b._fechaStr === request.fecha || b.date === request.fecha || b.id === request.fecha);
 
-    if (existingReservation.exists() || isDateAlreadyBookedLocal) {
+    if (isDateAlreadyBookedLocal) {
       return showToast('⚠️ Esta fecha ya está reservada o bloqueada. No se convirtió la solicitud.', 'error');
     }
 
-    await setDoc(reservationRef, {
-      date: request.fecha,
-      status: newStatus,
-      base_event_total: Number(request.precio_total || 0),
-      extras: [],
-      extras_total: 0,
-      precio_total: Number(request.precio_total || 0),
-      anticipo: anticipoNum,
-      depto_incluido: request.depto_incluido || false,
-      cliente_nombre: request.cliente_nombre || 'Sin nombre',
-      cliente_telefono: request.cliente_telefono || '',
-      cliente_correo: request.cliente_correo || '',
-      descuento_aplicado: 0,
-      origen: 'web_publica',
-      solicitudWebId: request.id,
-      timestamp: new Date().toISOString(),
-      createdBy: activeProfile?.name || 'Admin'
-    });
+    await runTransaction(db, async (transaction) => {
+      const reservationRef = doc(db, 'reservaciones', request.fecha);
+      const occupiedRef = doc(db, 'fechas_ocupadas', request.fecha);
+      const requestRef = doc(db, 'solicitudes_reserva', request.id);
 
-await setDoc(doc(db, 'fechas_ocupadas', request.fecha), {
-  fecha: request.fecha,
-  status: 'ocupada',
-  reservacionId: request.fecha,
-  solicitudWebId: request.id,
-  origen: 'web_publica',
-  updatedAt: new Date().toISOString()
-});
+      const reservationSnap = await transaction.get(reservationRef);
+      const occupiedSnap = await transaction.get(occupiedRef);
 
-    await updateDoc(doc(db, 'solicitudes_reserva', request.id), {
-      status: 'convertida',
-      convertedAt: new Date().toISOString(),
-      convertedBy: activeProfile?.name || 'Admin',
-      convertedToReservationId: request.fecha
+      if (reservationSnap.exists() || occupiedSnap.exists()) {
+        throw new Error('DATE_OCCUPIED');
+      }
+
+      const now = new Date().toISOString();
+
+      transaction.set(reservationRef, {
+        date: request.fecha,
+        status: newStatus,
+        fecha_contratacion: anticipoNum > 0 ? now.split('T')[0] : '',
+        costo_salon: requestSalonCost,
+        costo_departamento: requestDeptoCost,
+        base_event_total: requestTotal,
+        extras: [],
+        extras_total: 0,
+        precio_total: requestTotal,
+        anticipo: anticipoNum,
+        depto_incluido: request.depto_incluido || false,
+        cliente_nombre: request.cliente_nombre || 'Sin nombre',
+        cliente_telefono: request.cliente_telefono || '',
+        cliente_correo: request.cliente_correo || '',
+        descuento_aplicado: 0,
+        origen: 'web_publica',
+        solicitudWebId: request.id,
+        timestamp: now,
+        createdBy: activeProfile?.name || 'Admin'
+      });
+
+      transaction.set(occupiedRef, {
+        fecha: request.fecha,
+        status: 'ocupada',
+        reservacionId: request.fecha,
+        solicitudWebId: request.id,
+        origen: 'web_publica',
+        updatedAt: now
+      });
+
+      transaction.set(requestRef, {
+        status: 'convertida',
+        convertedAt: now,
+        convertedBy: activeProfile?.name || 'Admin',
+        convertedToReservationId: request.fecha
+      }, { merge: true });
     });
 
     showToast(anticipoNum > 0 ? 'Solicitud convertida en reserva con anticipo' : 'Solicitud convertida en reserva pendiente');
   } catch (err) {
     console.error(err);
-    showToast('Error al convertir solicitud: ' + err.message, 'error');
+    if (err.message === 'DATE_OCCUPIED') {
+      showToast('⚠️ Esta fecha ya está reservada o bloqueada. No se convirtió la solicitud.', 'error');
+    } else {
+      showToast('Error al convertir solicitud: ' + (err.message || 'Error desconocido'), 'error');
+    }
   }
 };
 
@@ -1538,7 +1615,12 @@ const handleDiscardWebRequest = async (request) => {
               const anticipoNum = Number(amount) || 0;
               const newStatus = anticipoNum > 0 ? 'Anticipado' : 'Pendiente';
               try {
-                await updateDoc(doc(db, 'reservaciones', id), { status: newStatus, anticipo: anticipoNum });
+                const currentBooking = bookings.find(booking => booking.id === id);
+                const updatePayload = { status: newStatus, anticipo: anticipoNum };
+                if (anticipoNum > 0 && !currentBooking?.fecha_contratacion) {
+                  updatePayload.fecha_contratacion = new Date().toISOString().split('T')[0];
+                }
+                await updateDoc(doc(db, 'reservaciones', id), updatePayload);
                 showToast(anticipoNum > 0 ? 'Reserva aprobada.' : 'Reserva Pendiente.');
               } catch(err) { console.error(err); }
             }
@@ -1547,7 +1629,11 @@ const handleDiscardWebRequest = async (request) => {
           const confirmLiquidar = async () => {
             if (!bookingToLiquidate) return;
             try {
-              await updateDoc(doc(db, 'reservaciones', bookingToLiquidate.id), { status: 'Liquidado', anticipo: Number(bookingToLiquidate._precioTotal) });
+              await updateDoc(doc(db, 'reservaciones', bookingToLiquidate.id), {
+                status: 'Liquidado',
+                anticipo: Number(bookingToLiquidate._precioTotal),
+                ...(!bookingToLiquidate.fecha_contratacion ? { fecha_contratacion: new Date().toISOString().split('T')[0] } : {})
+              });
               showToast('Evento Liquidado Exitosamente');
               setBookingToLiquidate(null);
             } catch(err) { console.error(err); showToast('Error al liquidar', 'error'); }
@@ -1577,9 +1663,13 @@ const handleDiscardWebRequest = async (request) => {
 
             const extras = normalizeBookingExtras(editingBooking.extras || []);
             const extrasTotal = calculateExtrasTotal(extras);
-            const baseTotal = Number(editingBooking.base_event_total || 0);
+            const salonCost = Number(editingBooking.costo_salon || 0);
+            const deptoCost = editingBooking.depto_incluido ? Number(editingBooking.costo_departamento || 0) : 0;
+            const baseTotal = salonCost + deptoCost;
             const total = baseTotal + extrasTotal;
             const anticipo = Number(editingBooking.anticipo) || 0;
+            const existingContractDate = editingBooking.fecha_contratacion || '';
+            const contractDate = existingContractDate || (anticipo > 0 ? new Date().toISOString().split('T')[0] : '');
             const dateChanged = newDate !== originalDate;
             
             let newStatus = 'Pendiente';
@@ -1595,6 +1685,9 @@ const handleDiscardWebRequest = async (request) => {
               horario_inicio: editingBooking.horario_inicio || '',
               horario_fin: editingBooking.horario_fin || '',
               date: newDate,
+              fecha_contratacion: contractDate,
+              costo_salon: salonCost,
+              costo_departamento: deptoCost,
               base_event_total: baseTotal,
               extras,
               extras_total: extrasTotal,
@@ -1709,20 +1802,22 @@ const handleDiscardWebRequest = async (request) => {
 
           const handleEditDeptoToggle = (e) => {
             const isChecked = e.target.checked;
-            const d = new Date(editingBooking.date + 'T12:00:00');
-            const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-            const deptoPrice = isWknd ? 2000 : 1600;
-            const discount = Number(editingBooking.descuento_aplicado || 0);
-            const deptoFinalPrice = deptoPrice - (deptoPrice * (discount / 100));
 
             setEditingBooking(prev => {
-              const nextBaseTotal = Math.round(isChecked ? Number(prev.base_event_total || 0) + deptoFinalPrice : Number(prev.base_event_total || 0) - deptoFinalPrice);
+              const suggested = getSuggestedBookingCosts(prev.date, isChecked, prev.descuento_aplicado || 0);
+              const salonCost = Number(prev.costo_salon || 0);
+              const deptoCost = isChecked
+                ? (Number(prev.costo_departamento || 0) || suggested.depto)
+                : 0;
               const extrasTotal = calculateExtrasTotal(prev.extras || []);
+              const baseTotal = salonCost + deptoCost;
+
               return {
                 ...prev,
                 depto_incluido: isChecked,
-                base_event_total: nextBaseTotal,
-                precio_total: nextBaseTotal + extrasTotal
+                costo_departamento: deptoCost,
+                base_event_total: baseTotal,
+                precio_total: baseTotal + extrasTotal
               };
             });
           };
@@ -1817,83 +1912,122 @@ const handleGenerateContractFromBooking = (booking) => {
   if (!booking) return;
 
   const nombre = booking._nombreStr || booking.cliente_nombre || '[Nombre del cliente]';
-  const fecha = formatDateForContract(booking._fechaStr || booking.date);
+  const fechaEventoRaw = booking._fechaStr || booking.date || '';
+  const fechaEvento = formatDateForContract(fechaEventoRaw);
   const telefono = booking._telefonoStr || booking.cliente_telefono || '';
   const correo = booking._correoStr || booking.cliente_correo || '';
   const total = Number(booking._precioTotal || booking.precio_total || 0);
   const anticipo = Number(booking._anticipo || booking.anticipo || 0);
   const saldo = Math.max(0, total - anticipo);
   const incluyeDepto = booking.depto_incluido === true;
-const tipoEvento = booking.tipo_evento || booking.type || '[tipo de evento]';
-const horarioInicio = booking.horario_inicio || booking.startTime || '[hora de inicio]';
-const horarioFin = booking.horario_fin || booking.endTime || '[hora de salida]';
+  const tipoEvento = booking.tipo_evento || booking.type || '[Tipo de evento]';
+  const horarioInicio = booking.horario_inicio || booking.startTime || '[hora de inicio]';
+  const horarioFin = booking.horario_fin || booking.endTime || '[hora de salida]';
   const extras = normalizeBookingExtras(booking.extras || booking._extras);
   const extrasTotal = Number(booking.extras_total || booking._extrasTotal || calculateExtrasTotal(extras)) || 0;
   const baseTotal = Number(booking.base_event_total ?? booking._baseEventTotal ?? Math.max(0, total - extrasTotal)) || 0;
 
-  const today = new Date();
-  const todayStr = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+  const suggestedCosts = getSuggestedBookingCosts(fechaEventoRaw, incluyeDepto, booking.descuento_aplicado || 0);
+  const fallbackDeptoCost = incluyeDepto ? Math.min(suggestedCosts.depto, baseTotal) : 0;
+  const costoDepartamento = Number(booking.costo_departamento ?? booking.costo_depto ?? fallbackDeptoCost) || 0;
+  const costoSalon = Number(booking.costo_salon ?? Math.max(0, baseTotal - costoDepartamento)) || 0;
 
-  let costBreakdown = '';
-  costBreakdown += `Renta base del espacio: $${baseTotal.toLocaleString('es-MX')} MXN\n`;
+  const storedContractDate = booking.fecha_contratacion || (anticipo > 0 ? getDateFromStoredValue(booking.timestamp) : '');
+  const todayStr = new Date().toISOString().split('T')[0];
+  const fechaContratacion = formatDateForContract(storedContractDate || todayStr);
 
-  if (incluyeDepto) {
-    costBreakdown += `Incluye departamento privado: Sí\n`;
-  } else {
-    costBreakdown += `Incluye departamento privado: No\n`;
-  }
-
+  let extrasDetail = '';
   if (extras.length > 0 && extrasTotal > 0) {
-    costBreakdown += `\nExtras del evento:\n`;
+    extrasDetail = `\n\nDetalle de servicios adicionales:\n`;
     extras.forEach(extra => {
-      costBreakdown += `• ${extra.concepto}: ${extra.cantidad} x $${Number(extra.precio_unitario || 0).toLocaleString('es-MX')} = $${Number(extra.total || 0).toLocaleString('es-MX')} MXN\n`;
+      extrasDetail += `• ${extra.concepto}: ${extra.cantidad} x $${Number(extra.precio_unitario || 0).toLocaleString('es-MX')} = $${Number(extra.total || 0).toLocaleString('es-MX')} MXN\n`;
     });
   }
 
-  const text = `*CONTRATO DE RENTA DE ESPACIO "CASA COPAL"* 🌿
-FECHA DE ELABORACIÓN: ${todayStr}
+  const text = `# CONTRATO DE RENTA DE ESPACIO
 
-*1. LAS PARTES*
-Arrendador: Casa Copal Eventos
-Cliente: ${nombre}
-Teléfono: ${telefono || '[Teléfono]'}
-Correo: ${correo || '[Correo]'}
+## CASA COPAL 🌿
 
-*2. DETALLES DEL EVENTO*
-Fecha del evento: ${fecha}
-Horario: De ${horarioInicio} a ${horarioFin} hrs.
-Tipo de evento: ${tipoEvento}
-Máximo invitados: 50 personas.
-Espacio reservado: ${incluyeDepto ? 'Salón Principal + Departamento Privado' : 'Salón Principal'}
+**Fecha de contratación:** ${fechaContratacion}
 
-*3. FINANZAS*
-${costBreakdown.trim()}
+### 1. DATOS DEL EVENTO
 
-*TOTAL A PAGAR:* $${total.toLocaleString('es-MX')} MXN
-*ANTICIPO RECIBIDO:* $${anticipo.toLocaleString('es-MX')} MXN
-*SALDO A LIQUIDAR:* $${saldo.toLocaleString('es-MX')} MXN
+**Cliente:** ${nombre}
+**Teléfono:** ${telefono || '[Teléfono]'}
+**Correo:** ${correo || '[Correo]'}
+**Fecha del evento:** ${fechaEvento}
+**Horario:** De ${horarioInicio} a ${horarioFin}
+**Tipo de evento:** ${tipoEvento}
+**Número máximo de invitados:** 50 personas
+**Espacio contratado:** ${incluyeDepto ? 'Salón principal y departamento privado' : 'Salón principal'}
 
-*DEPÓSITO EN GARANTÍA:* $1,500 MXN
-El depósito en garantía es reembolsable después del evento, siempre que no existan daños, incumplimientos o cargos pendientes.
+### 2. COSTOS Y PAGOS
 
-*4. CONDICIONES DE USO Y GARANTÍA*
-El depósito de $1,500 MXN podrá no ser devuelto total o parcialmente en los siguientes casos:
-A) Ruido excesivo fuera del horario permitido.
-B) Ingresar botellas, vasos u objetos de vidrio al área de alberca.
-C) Daños al mobiliario, instalaciones, cerraduras, equipo o decoración del lugar.
-D) Uso de pirotecnia, confeti metálico o elementos que dañen o ensucien excesivamente el espacio.
-E) Dejar asador encendido, refrigerador sucio, basura fuera de su lugar o áreas en condiciones inadecuadas.
+**Renta del salón:** $${costoSalon.toLocaleString('es-MX')} MXN
+**Renta del departamento:** $${costoDepartamento.toLocaleString('es-MX')} MXN
+**Servicios adicionales:** $${extrasTotal.toLocaleString('es-MX')} MXN${extrasDetail}
 
-*5. CANCELACIONES*
-Cancelaciones con menos de 6 días de anticipación no son reembolsables.
+**Total del evento:** $${total.toLocaleString('es-MX')} MXN
+**Anticipo recibido:** $${anticipo.toLocaleString('es-MX')} MXN
+**Saldo pendiente:** $${saldo.toLocaleString('es-MX')} MXN
 
-*6. CONFIRMACIÓN*
-Para confirmar que acepta las condiciones de renta de Casa Copal, favor de responder a este mensaje con la frase:
+El saldo deberá quedar liquidado a más tardar un día antes del evento.
 
-*"Acepto términos y condiciones"*`;
+**Depósito en garantía:** $1,500 MXN
+
+El depósito será reembolsado dentro de las 24 horas posteriores al evento, después de revisar que las instalaciones, mobiliario y equipo se encuentren en buenas condiciones.
+
+Si los daños o gastos de limpieza exceden el depósito, el cliente deberá cubrir la diferencia correspondiente.
+
+### 3. CANCELACIONES Y CAMBIOS DE FECHA
+
+El anticipo asegura la fecha reservada.
+
+Las cancelaciones realizadas con menos de 6 días de anticipación no serán reembolsables.
+
+Los cambios de fecha estarán sujetos a disponibilidad y deberán ser autorizados previamente por Casa Copal.
+
+### 4. USO Y CUIDADO DEL ESPACIO
+
+El cliente se compromete a utilizar las instalaciones de forma responsable y a respetar el reglamento de Casa Copal.
+
+El cliente será responsable del comportamiento de sus invitados, menores de edad, proveedores y cualquier persona que ingrese al evento.
+
+No se permite:
+
+* Usar pirotecnia o confeti metálico.
+* Introducir botellas, vasos u objetos de vidrio al área de alberca.
+* Dañar mobiliario, muros, plantas, equipo o instalaciones.
+* Dejar encendido el asador al finalizar el evento.
+* Exceder el horario contratado sin autorización.
+* Realizar actividades que pongan en riesgo a los asistentes o al inmueble.
+
+### 5. SEGURIDAD Y RESPONSABILIDAD
+
+Los menores de edad deberán permanecer supervisados por un adulto en todo momento, especialmente en la alberca, escaleras, barandales y áreas húmedas.
+
+Casa Copal no cuenta con personal para el cuidado o vigilancia individual de menores.
+
+Casa Copal no será responsable por accidentes, caídas, golpes, lesiones o pérdida de pertenencias que sean consecuencia de descuidos, juegos, falta de supervisión, consumo de alcohol, uso inadecuado de las instalaciones o incumplimiento del reglamento.
+
+Casa Copal se compromete a entregar el espacio en condiciones razonables de uso. Cualquier daño, desperfecto o situación de riesgo deberá reportarse inmediatamente.
+
+### 6. HORARIO Y RUIDO
+
+El cliente se compromete a respetar el horario contratado y las indicaciones relacionadas con el volumen de la música.
+
+Cualquier ampliación de horario deberá ser autorizada previamente por Casa Copal y podrá generar un costo adicional.
+
+### 7. ACEPTACIÓN
+
+Para confirmar la reserva, el cliente deberá responder a este mensaje con la siguiente frase:
+
+**“Acepto los términos, condiciones y reglamento de Casa Copal.”**
+
+Con esta aceptación, el cliente confirma que recibió, leyó y aceptó las condiciones de pago, cancelación, uso del espacio, seguridad, horarios, daños y responsabilidad de invitados.`;
 
   setContractPreview({
-    title: `Contrato - ${nombre} - ${booking._fechaStr || booking.date || ''}`,
+    title: `Contrato - ${nombre} - ${fechaEventoRaw}`,
     text
   });
 };
@@ -2200,6 +2334,15 @@ return (
                                 const bookingExtras = normalizeBookingExtras(b.extras || b._extras);
                                 const bookingExtrasTotal = Number(b.extras_total || b._extrasTotal || calculateExtrasTotal(bookingExtras)) || 0;
                                 const bookingBaseTotal = Number(b.base_event_total ?? b._baseEventTotal ?? Math.max(0, b._precioTotal - bookingExtrasTotal)) || 0;
+                                const suggestedCosts = getSuggestedBookingCosts(b._fechaStr, b.depto_incluido === true, b.descuento_aplicado || 0);
+                                const storedDeptoCost = b.costo_departamento ?? b.costo_depto;
+                                const bookingDeptoCost = storedDeptoCost !== undefined
+                                  ? Number(storedDeptoCost || 0)
+                                  : (b.depto_incluido ? Math.min(suggestedCosts.depto, bookingBaseTotal) : 0);
+                                const bookingSalonCost = b.costo_salon !== undefined
+                                  ? Number(b.costo_salon || 0)
+                                  : Math.max(0, bookingBaseTotal - bookingDeptoCost);
+                                const bookingContractDate = b.fecha_contratacion || (b._anticipo > 0 ? getDateFromStoredValue(b.timestamp) : '');
                                 setEditingBooking({
   ...b,
   date: b._fechaStr,
@@ -2210,6 +2353,9 @@ return (
   tipo_evento: b.tipo_evento || b.type || '',
   horario_inicio: b.horario_inicio || b.startTime || '',
   horario_fin: b.horario_fin || b.endTime || '',
+  fecha_contratacion: bookingContractDate,
+  costo_salon: bookingSalonCost,
+  costo_departamento: bookingDeptoCost,
   base_event_total: bookingBaseTotal,
   extras: bookingExtras,
   extras_total: bookingExtrasTotal,
@@ -2343,14 +2489,13 @@ return (
                         <div>
                           <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Fecha</label>
                           <input type="date" required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-bold text-slate-700" value={form.date} onChange={e => {
-                            const d = new Date(e.target.value + 'T12:00:00');
-                            const isWknd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-                            setForm({...form, date: e.target.value, isWeekend: isWknd});
+                            const suggested = getSuggestedBookingCosts(e.target.value, form.includesDepto, form.discount);
+                            setForm({...form, date: e.target.value, isWeekend: suggested.isWeekend, costSalon: suggested.salon, costDepto: suggested.depto});
                           }} />
                         </div>
                         <div>
                           <label className="block text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1.5">Descuento (%)</label>
-                          <input type="number" min="0" max="100" placeholder="0" className="w-full p-3 bg-blue-50 border border-blue-200 text-blue-700 font-black rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm" value={form.discount || ''} onChange={e => setForm({...form, discount: e.target.value})} />
+                          <input type="number" min="0" max="100" placeholder="0" className="w-full p-3 bg-blue-50 border border-blue-200 text-blue-700 font-black rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm" value={form.discount || ''} onChange={e => { const suggested = getSuggestedBookingCosts(form.date, form.includesDepto, e.target.value); setForm({...form, discount: e.target.value, costSalon: suggested.salon, costDepto: suggested.depto}); }} />
                         </div>
                       </div>
 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -2386,12 +2531,23 @@ return (
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <label className="flex items-center gap-3 text-sm font-bold cursor-pointer text-slate-700 bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl w-full">
-                          <input type="checkbox" className="w-4 h-4 text-emerald-600 rounded" checked={form.includesDepto} onChange={e => setForm({...form, includesDepto: e.target.checked})} />
+                          <input type="checkbox" className="w-4 h-4 text-emerald-600 rounded" checked={form.includesDepto} onChange={e => { const suggested = getSuggestedBookingCosts(form.date, e.target.checked, form.discount); setForm({...form, includesDepto: e.target.checked, costSalon: suggested.salon, costDepto: suggested.depto}); }} />
                           <span>Incluye Departamento</span>
                         </label>
                         <div>
                           <label className="block text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1.5">Anticipo ($)</label>
                           <input type="number" required placeholder="0" className="w-full p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 font-black rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm" value={form.anticipo} onChange={e => setForm({...form, anticipo: e.target.value})} />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Renta del salón ($)</label>
+                          <input type="number" min="0" required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-black text-slate-800" value={form.costSalon} onChange={e => setForm({...form, costSalon: e.target.value})} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Renta del departamento ($)</label>
+                          <input type="number" min="0" required={form.includesDepto} disabled={!form.includesDepto} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-black text-slate-800 disabled:opacity-50" value={form.includesDepto ? form.costDepto : 0} onChange={e => setForm({...form, costDepto: e.target.value})} />
                         </div>
                       </div>
 
@@ -2432,6 +2588,12 @@ return (
                           <i className="fa-solid fa-calendar-days mr-1"></i> Se reprogramará de <strong>{editingBooking.originalDate}</strong> a <strong>{editingBooking.date}</strong>. La tarifa y el anticipo no cambiarán automáticamente.
                         </div>
                       )}
+                      <div>
+                        <label className="block text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1.5">Fecha de contratación</label>
+                        <input type="date" className="w-full p-3 bg-blue-50 border border-blue-200 rounded-xl outline-none focus:border-blue-500 font-black text-blue-700" value={editingBooking.fecha_contratacion || ''} onChange={e => setEditingBooking({...editingBooking, fecha_contratacion: e.target.value})} />
+                        <p className="text-[10px] text-slate-500 font-bold mt-1">Se registra automáticamente al recibir el primer anticipo. En reservas antiguas puedes corregirla aquí.</p>
+                      </div>
+
                       <div className="grid grid-cols-2 gap-4">
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Teléfono</label><input type="tel" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={editingBooking.cliente_telefono} onChange={e => setEditingBooking({...editingBooking, cliente_telefono: e.target.value})} /></div>
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Correo (Opcional)</label><input type="email" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-bold text-slate-700" value={editingBooking.cliente_correo || ''} onChange={e => setEditingBooking({...editingBooking, cliente_correo: e.target.value})} /></div>
@@ -2466,10 +2628,14 @@ return (
     />
   </div>
 </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Renta del salón ($)</label><input type="number" min="0" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-black text-slate-800" value={editingBooking.costo_salon || 0} onChange={e => { const salon = Number(e.target.value) || 0; const depto = editingBooking.depto_incluido ? Number(editingBooking.costo_departamento || 0) : 0; const extrasTotal = calculateExtrasTotal(editingBooking.extras || []); setEditingBooking({...editingBooking, costo_salon: e.target.value, base_event_total: salon + depto, precio_total: salon + depto + extrasTotal}); }} required/></div>
+                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Renta del departamento ($)</label><input type="number" min="0" disabled={!editingBooking.depto_incluido} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-black text-slate-800 disabled:opacity-50" value={editingBooking.depto_incluido ? (editingBooking.costo_departamento || 0) : 0} onChange={e => { const depto = Number(e.target.value) || 0; const salon = Number(editingBooking.costo_salon || 0); const extrasTotal = calculateExtrasTotal(editingBooking.extras || []); setEditingBooking({...editingBooking, costo_departamento: e.target.value, base_event_total: salon + depto, precio_total: salon + depto + extrasTotal}); }} required={editingBooking.depto_incluido}/></div>
+                      </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Total base ($)</label><input type="number" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-black text-slate-800" value={editingBooking.base_event_total || 0} onChange={e => { const base = Number(e.target.value) || 0; const extrasTotal = calculateExtrasTotal(editingBooking.extras || []); setEditingBooking({...editingBooking, base_event_total: e.target.value, precio_total: base + extrasTotal}); }} required/></div>
+                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Total base ($)</label><input type="text" readOnly className="w-full p-3 bg-slate-100 border border-slate-200 rounded-xl outline-none font-black text-slate-700" value={`$${(Number(editingBooking.costo_salon || 0) + (editingBooking.depto_incluido ? Number(editingBooking.costo_departamento || 0) : 0)).toLocaleString()}`} /></div>
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Extras ($)</label><input type="text" readOnly className="w-full p-3 bg-blue-50 border border-blue-100 rounded-xl outline-none font-black text-blue-700" value={`$${calculateExtrasTotal(editingBooking.extras || []).toLocaleString()}`} /></div>
-                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Total evento ($)</label><input type="text" readOnly className="w-full p-3 bg-emerald-50 border border-emerald-100 rounded-xl outline-none font-black text-emerald-700" value={`$${(Number(editingBooking.base_event_total || 0) + calculateExtrasTotal(editingBooking.extras || [])).toLocaleString()}`} /></div>
+                        <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Total evento ($)</label><input type="text" readOnly className="w-full p-3 bg-emerald-50 border border-emerald-100 rounded-xl outline-none font-black text-emerald-700" value={`$${(Number(editingBooking.costo_salon || 0) + (editingBooking.depto_incluido ? Number(editingBooking.costo_departamento || 0) : 0) + calculateExtrasTotal(editingBooking.extras || [])).toLocaleString()}`} /></div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Anticipo ($)</label><input type="number" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-black text-emerald-600" value={editingBooking.anticipo || 0} onChange={e => setEditingBooking({...editingBooking, anticipo: e.target.value})} required/></div>
@@ -2543,7 +2709,7 @@ return (
 
       <div className="p-6 overflow-y-auto space-y-4">
         <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-xs font-bold leading-relaxed">
-          Revisa y completa manualmente los datos que todavía no están guardados en la reserva, como horario y tipo de evento.
+          Antes de copiar, revisa horario, tipo de evento, fecha de contratación y desglose de salón/departamento. En reservas nuevas estos datos se guardan automáticamente; en reservas antiguas conviene verificarlos una vez.
         </div>
 
         <textarea
@@ -3016,13 +3182,9 @@ return (
             }
 
             try {
-              // Validación local rápida y validación directa en Firestore.
-              // La validación directa evita sobrescribir una fecha aunque la lista local de bookings no se haya actualizado todavía.
               const isDateAlreadyBookedLocal = bookings.some(b => b._fechaStr === date || b.date === date || b.id === date);
-              const reservationRef = doc(db, 'reservaciones', date);
-              const existingReservation = await getDoc(reservationRef);
 
-              if (isDateAlreadyBookedLocal || existingReservation.exists()) {
+              if (isDateAlreadyBookedLocal) {
                 const occupiedMsg = '⚠️ Esta fecha ya está reservada o bloqueada. No se creó otra reserva.';
                 setContractNotice(occupiedMsg, 'error');
                 showToast(occupiedMsg, 'error');
@@ -3031,34 +3193,63 @@ return (
 
               const newStatus = deposit > 0 ? 'Anticipado' : 'Pendiente';
 
-              await setDoc(reservationRef, {
-                date,
-                status: newStatus,
-                precio_total: total,
-                base_event_total: total,
-                extras: [],
-                extras_total: 0,
-                anticipo: deposit,
-                depto_incluido: depto > 0,
-                cliente_nombre: client,
-                cliente_telefono: contractData.phone || '',
-                cliente_correo: contractData.email || '',
-                tipo_evento: contractData.type || '',
-                horario_inicio: contractData.startTime || '',
-                horario_fin: contractData.endTime || '',
-                costo_salon: salon,
-                costo_depto: depto,
-                descuento_aplicado: discountPct,
-                origen: 'hub_contrato',
-                timestamp: new Date().toISOString()
+              await runTransaction(db, async (transaction) => {
+                const reservationRef = doc(db, 'reservaciones', date);
+                const occupiedRef = doc(db, 'fechas_ocupadas', date);
+
+                const reservationSnap = await transaction.get(reservationRef);
+                const occupiedSnap = await transaction.get(occupiedRef);
+
+                if (reservationSnap.exists() || occupiedSnap.exists()) {
+                  throw new Error('DATE_OCCUPIED');
+                }
+
+                const now = new Date().toISOString();
+
+                transaction.set(reservationRef, {
+                  date,
+                  status: newStatus,
+                  fecha_contratacion: deposit > 0 ? now.split('T')[0] : '',
+                  precio_total: total,
+                  costo_salon: salon,
+                  costo_departamento: depto,
+                  base_event_total: total,
+                  extras: [],
+                  extras_total: 0,
+                  anticipo: deposit,
+                  depto_incluido: depto > 0,
+                  cliente_nombre: client,
+                  cliente_telefono: contractData.phone || '',
+                  cliente_correo: contractData.email || '',
+                  tipo_evento: contractData.type || '',
+                  horario_inicio: contractData.startTime || '',
+                  horario_fin: contractData.endTime || '',
+                  descuento_aplicado: discountPct,
+                  origen: 'hub_contrato',
+                  timestamp: now
+                });
+
+                transaction.set(occupiedRef, {
+                  fecha: date,
+                  status: 'ocupada',
+                  reservacionId: date,
+                  origen: 'hub_contrato',
+                  updatedAt: now
+                });
               });
               setContractNotice('✅ Reserva creada correctamente desde el contrato. Ya puedes revisarla en Centro de Reservas.', 'success');
               showToast('Reserva creada desde contrato');
               if (onReservationCreated) onReservationCreated();
             } catch (err) {
               console.error(err);
-              setContractNotice('Error al crear reserva: ' + err.message, 'error');
-              showToast('Error al crear reserva: ' + err.message, 'error');
+              if (err.message === 'DATE_OCCUPIED') {
+                const occupiedMsg = '⚠️ Esta fecha ya está reservada o bloqueada. No se creó otra reserva.';
+                setContractNotice(occupiedMsg, 'error');
+                showToast(occupiedMsg, 'error');
+              } else {
+                setContractNotice('Error al crear reserva: ' + (err.message || 'Error desconocido'), 'error');
+                showToast('Error al crear reserva: ' + (err.message || 'Error desconocido'), 'error');
+              }
             }
           };
 
