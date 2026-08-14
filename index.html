@@ -1389,10 +1389,12 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
           };
 
 const handleSyncOccupiedDates = async () => {
-  if (!window.confirm('¿Sincronizar todas las reservas actuales con fechas_ocupadas?')) return;
+  if (!window.confirm('¿Sincronizar reservas y solicitudes web pendientes con fechas_ocupadas?')) return;
 
   try {
     const validBookings = bookings.filter(b => b._fechaStr);
+    const validWebRequests = webRequests.filter(req => req.fecha);
+    const now = new Date().toISOString();
 
     await Promise.all(validBookings.map(b => 
       setDoc(doc(db, 'fechas_ocupadas', b._fechaStr), {
@@ -1400,11 +1402,46 @@ const handleSyncOccupiedDates = async () => {
         status: 'ocupada',
         reservacionId: b.id,
         origen: b.origen || b._origen || 'admin',
-        updatedAt: new Date().toISOString()
+        updatedAt: now
       }, { merge: true })
     ));
 
-    showToast(`Se sincronizaron ${validBookings.length} fechas ocupadas`);
+    let temporaryBlocksCreated = 0;
+    let temporaryBlocksSkipped = 0;
+
+    for (const request of validWebRequests) {
+      const result = await runTransaction(db, async (transaction) => {
+        const reservationRef = doc(db, 'reservaciones', request.fecha);
+        const occupiedRef = doc(db, 'fechas_ocupadas', request.fecha);
+
+        const reservationSnap = await transaction.get(reservationRef);
+        const occupiedSnap = await transaction.get(occupiedRef);
+
+        if (reservationSnap.exists()) return 'skip';
+
+        if (occupiedSnap.exists()) {
+          const occupiedData = occupiedSnap.data();
+          return occupiedData.solicitudWebId === request.id ? 'exists' : 'skip';
+        }
+
+        transaction.set(occupiedRef, {
+          fecha: request.fecha,
+          status: 'bloqueo_temporal',
+          solicitudWebId: request.id,
+          origen: 'web_publica',
+          createdAt: request.createdAt || now,
+          updatedAt: now
+        });
+
+        return 'created';
+      });
+
+      if (result === 'created') temporaryBlocksCreated += 1;
+      if (result === 'skip') temporaryBlocksSkipped += 1;
+    }
+
+    const skippedText = temporaryBlocksSkipped > 0 ? `; ${temporaryBlocksSkipped} solicitud(es) omitida(s) por conflicto` : '';
+    showToast(`Sincronización lista: ${validBookings.length} reservas y ${temporaryBlocksCreated} bloqueo(s) temporal(es) creados${skippedText}`);
   } catch (err) {
     console.error(err);
     showToast('Error al sincronizar fechas ocupadas: ' + err.message, 'error');
@@ -1530,9 +1567,22 @@ const handleSyncOccupiedDates = async () => {
 
       const reservationSnap = await transaction.get(reservationRef);
       const occupiedSnap = await transaction.get(occupiedRef);
+      const requestSnap = await transaction.get(requestRef);
 
-      if (reservationSnap.exists() || occupiedSnap.exists()) {
+      if (!requestSnap.exists() || String(requestSnap.data().status || '').toLowerCase() !== 'pendiente') {
+        throw new Error('REQUEST_NOT_PENDING');
+      }
+
+      if (reservationSnap.exists()) {
         throw new Error('DATE_OCCUPIED');
+      }
+
+      if (occupiedSnap.exists()) {
+        const occupiedData = occupiedSnap.data();
+        const belongsToThisRequest = occupiedData.solicitudWebId === request.id;
+        if (!belongsToThisRequest) {
+          throw new Error('DATE_OCCUPIED');
+        }
       }
 
       const now = new Date().toISOString();
@@ -1566,7 +1616,7 @@ const handleSyncOccupiedDates = async () => {
         solicitudWebId: request.id,
         origen: 'web_publica',
         updatedAt: now
-      });
+      }, { merge: true });
 
       transaction.set(requestRef, {
         status: 'convertida',
@@ -1580,7 +1630,9 @@ const handleSyncOccupiedDates = async () => {
   } catch (err) {
     console.error(err);
     if (err.message === 'DATE_OCCUPIED') {
-      showToast('⚠️ Esta fecha ya está reservada o bloqueada. No se convirtió la solicitud.', 'error');
+      showToast('⚠️ Esta fecha pertenece a otra reserva o solicitud. No se convirtió.', 'error');
+    } else if (err.message === 'REQUEST_NOT_PENDING') {
+      showToast('Esta solicitud ya no está pendiente. Actualiza la página y vuelve a revisar.', 'error');
     } else {
       showToast('Error al convertir solicitud: ' + (err.message || 'Error desconocido'), 'error');
     }
@@ -1597,16 +1649,41 @@ const handleDiscardWebRequest = async (request) => {
   }
 
   try {
-    await updateDoc(doc(db, 'solicitudes_reserva', request.id), {
-      status: 'descartada',
-      discardedAt: new Date().toISOString(),
-      discardedBy: activeProfile?.name || 'Admin'
+    const releasedHold = await runTransaction(db, async (transaction) => {
+      const requestRef = doc(db, 'solicitudes_reserva', request.id);
+      const occupiedRef = doc(db, 'fechas_ocupadas', request.fecha);
+
+      const requestSnap = await transaction.get(requestRef);
+      const occupiedSnap = await transaction.get(occupiedRef);
+
+      if (!requestSnap.exists()) {
+        throw new Error('REQUEST_NOT_FOUND');
+      }
+
+      const now = new Date().toISOString();
+      const ownsTemporaryHold = occupiedSnap.exists() && occupiedSnap.data().solicitudWebId === request.id;
+
+      transaction.set(requestRef, {
+        status: 'descartada',
+        discardedAt: now,
+        discardedBy: activeProfile?.name || 'Admin'
+      }, { merge: true });
+
+      if (ownsTemporaryHold) {
+        transaction.delete(occupiedRef);
+      }
+
+      return ownsTemporaryHold;
     });
 
-    showToast('Solicitud web descartada');
+    showToast(releasedHold ? 'Solicitud descartada y fecha liberada' : 'Solicitud web descartada');
   } catch (err) {
     console.error(err);
-    showToast('Error al descartar solicitud: ' + err.message, 'error');
+    if (err.message === 'REQUEST_NOT_FOUND') {
+      showToast('No se encontró la solicitud. Actualiza la página y vuelve a intentarlo.', 'error');
+    } else {
+      showToast('Error al descartar solicitud: ' + err.message, 'error');
+    }
   }
 };
           const handleApproveWebBooking = async (id) => {
@@ -2225,8 +2302,8 @@ return (
                 <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest mb-1">Fecha solicitada</p>
                 <h4 className="text-2xl font-black text-slate-800">{req.fecha || 'Sin fecha'}</h4>
               </div>
-              <span className={`text-[10px] font-black px-3 py-1.5 rounded-lg uppercase tracking-widest w-fit ${isAlreadyBooked ? 'bg-rose-100 text-rose-700 border border-rose-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
-                {isAlreadyBooked ? 'Fecha ya ocupada' : 'Disponible'}
+              <span className={`text-[10px] font-black px-3 py-1.5 rounded-lg uppercase tracking-widest w-fit ${isAlreadyBooked ? 'bg-rose-100 text-rose-700 border border-rose-200' : 'bg-amber-100 text-amber-800 border border-amber-200'}`}>
+                {isAlreadyBooked ? 'Fecha ya ocupada' : 'Bloqueo temporal'}
               </span>
             </div>
 
