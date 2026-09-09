@@ -1197,6 +1197,7 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
           const [bookingYearFilter, setBookingYearFilter] = useState('Todos');
           const [showBookingFormModal, setShowBookingFormModal] = useState(false);
           const [contractPreview, setContractPreview] = useState(null);
+          const [sendingEmailId, setSendingEmailId] = useState(null);
           
           useEffect(() => {
             if (initialData && canManageBookings) {
@@ -1959,10 +1960,15 @@ const handleDiscardWebRequest = async (request) => {
             }));
           };
 
-          const handleSendEmail = (booking) => {
+          const handleSendEmail = async (booking) => {
             const correo = booking._correoStr;
             if (!correo) {
               showToast('Este cliente no tiene correo registrado', 'error');
+              return;
+            }
+
+            if (!auth.currentUser) {
+              showToast('Tu sesión no está disponible. Inicia sesión nuevamente.', 'error');
               return;
             }
 
@@ -1983,7 +1989,7 @@ const handleDiscardWebRequest = async (request) => {
                 fechaBonita = texto.charAt(0).toUpperCase() + texto.slice(1);
             }
 
-            const asunto = encodeURIComponent(`Confirmación de Reserva - Casa Copal 🌿`);
+            const asunto = `Confirmación de Reserva - Casa Copal 🌿`;
             
             let cuerpo = `¡Hola ${nombre}!\n\n`;
             cuerpo += `Este correo es para confirmar formalmente que hemos recibido tu anticipo y tu reserva en Casa Copal está 100% segura.\n\n`;
@@ -2021,9 +2027,39 @@ const handleDiscardWebRequest = async (request) => {
             cuerpo += `Si tienes alguna duda adicional, seguimos en contacto por WhatsApp.\n\n`;
             cuerpo += `Atentamente,\nEquipo Casa Copal\ninfo@casacopal.com.mx`;
 
-            const enlaceCorreo = `mailto:${correo}?subject=${asunto}&body=${encodeURIComponent(cuerpo)}`;
-            window.open(enlaceCorreo, '_blank');
-};
+            setSendingEmailId(booking.id);
+            try {
+              const idToken = await auth.currentUser.getIdToken();
+              const response = await fetch('/api/send-email', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify({
+                  to: correo,
+                  subject: asunto,
+                  text: cuerpo
+                })
+              });
+
+              let result = {};
+              try {
+                result = await response.json();
+              } catch(e) {}
+
+              if (!response.ok) {
+                throw new Error(result.error || 'No se pudo enviar el correo.');
+              }
+
+              showToast(`Recibo enviado desde info@casacopal.com.mx a ${correo}`);
+            } catch (err) {
+              console.error('Error enviando recibo:', err);
+              showToast('Error al enviar el correo: ' + (err.message || 'Error desconocido'), 'error');
+            } finally {
+              setSendingEmailId(null);
+            }
+          };
 const formatDateForContract = (dateStr) => {
   if (!dateStr || !dateStr.includes('-')) return '[Fecha]';
   const parts = dateStr.split('-');
@@ -2105,7 +2141,7 @@ Si los daños o gastos de limpieza exceden el depósito, el cliente deberá cubr
 
 El anticipo asegura la fecha reservada.
 
-Las cancelaciones realizadas con menos de 6 días de anticipación no serán reembolsables.
+En caso de cancelación por parte del cliente, los anticipos, pagos parciales o cantidades ya cubiertas no serán reembolsables, debido a que la fecha se separa exclusivamente para su evento desde el momento de la confirmación.
 
 Los cambios de fecha estarán sujetos a disponibilidad y deberán ser autorizados previamente por Casa Copal.
 
@@ -2139,6 +2175,10 @@ Casa Copal se compromete a entregar el espacio en condiciones razonables de uso.
 El cliente se compromete a respetar el horario contratado y las indicaciones relacionadas con el volumen de la música.
 
 Cualquier ampliación de horario deberá ser autorizada previamente por Casa Copal y podrá generar un costo adicional.
+
+**PRIVACIDAD / INE**
+
+La identificación oficial será utilizada únicamente para validar la identidad del responsable del evento y administrar la reserva, conforme al Aviso de Privacidad de Casa Copal.
 
 ### 7. ACEPTACIÓN
 
@@ -2523,8 +2563,14 @@ return (
                                 </div>
                               )}
                               {b._correoStr && canManageBookings && canViewBookingFinancials && (
-                                <button onClick={() => handleSendEmail(b)} className="mt-1 inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-sm transition-colors w-fit" title="Enviar Confirmación por Correo">
-                                  <i className="fa-solid fa-paper-plane text-blue-500"></i> Enviar Recibo
+                                <button
+                                  onClick={() => handleSendEmail(b)}
+                                  disabled={sendingEmailId === b.id}
+                                  className={`mt-1 inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-sm transition-colors w-fit ${sendingEmailId === b.id ? 'opacity-60 cursor-wait' : ''}`}
+                                  title="Enviar recibo desde info@casacopal.com.mx"
+                                >
+                                  <i className={`fa-solid ${sendingEmailId === b.id ? 'fa-spinner fa-spin' : 'fa-paper-plane'} text-blue-500`}></i>
+                                  {sendingEmailId === b.id ? 'Enviando...' : 'Enviar Recibo'}
                                 </button>
                               )}
                             </div>
@@ -3414,7 +3460,7 @@ return (
             if (discountPct > 0) costBreakdown += `Descuento Aplicado (${discountPct}%): -$${discountAmount.toLocaleString()} MXN\n`;
             if (salon === 0 && depto === 0) costBreakdown += `Costo Renta: $0 MXN\n`;
 
-            const text = `*CONTRATO DE RENTA DE ESPACIO "CASA COPAL"* 🌿\nFECHA: ${todayStr}\n\n*1. LAS PARTES*\nArrendador: Casa Copal Eventos\nCliente: ${contractData.client || '[Nombre]'}\n\n*2. DETALLES DEL EVENTO*\nFecha: ${dateFormatted}\nHorario: De ${contractData.startTime || '[Inicio]'} a ${contractData.endTime || '[Fin]'} hrs.\nTipo: ${contractData.type || '[Tipo de Evento]'} (Ambiente familiar)\nMáximo Invitados: 50 personas.\n\n*3. FINANZAS*\n${costBreakdown.trim()}\n*TOTAL A PAGAR:* $${total.toLocaleString()} MXN\n\nAnticipo Recibido: $${deposit.toLocaleString()} MXN\n*SALDO A LIQUIDAR:* $${balance.toLocaleString()} MXN (Máximo 1 día antes del evento).\n*DEPÓSITO EN GARANTÍA:* $1,500 MXN (Reembolsable 24hrs post-evento).\n\n*4. PENALIZACIONES (CONDICIONES DE GARANTÍA)*\nEl depósito de $1,500 NO será devuelto en los siguientes casos:\nA) Ruido excesivo fuera de horario.\nB) Ingresar botellas/vasos de vidrio en área de alberca.\nC) Daños al mobiliario, uso de pirotecnia o confeti metálico.\nD) Dejar asador encendido, refrigerador sucio o basura fuera de su lugar.\n\n*5. CANCELACIONES*\nCancelaciones con menos de 6 días de anticipación no son reembolsables.\n\n✍️ *FIRMA DIGITAL DE CONFORMIDAD*\nPara confirmar tu reserva, aceptar este contrato y asegurar tu fecha, por favor responde a este mensaje con la frase:\n*"Acepto términos y condiciones"*`;
+            const text = `*CONTRATO DE RENTA DE ESPACIO "CASA COPAL"* 🌿\nFECHA: ${todayStr}\n\n*1. LAS PARTES*\nArrendador: Casa Copal Eventos\nCliente: ${contractData.client || '[Nombre]'}\n\n*2. DETALLES DEL EVENTO*\nFecha: ${dateFormatted}\nHorario: De ${contractData.startTime || '[Inicio]'} a ${contractData.endTime || '[Fin]'} hrs.\nTipo: ${contractData.type || '[Tipo de Evento]'} (Ambiente familiar)\nMáximo Invitados: 50 personas.\n\n*3. FINANZAS*\n${costBreakdown.trim()}\n*TOTAL A PAGAR:* $${total.toLocaleString()} MXN\n\nAnticipo Recibido: $${deposit.toLocaleString()} MXN\n*SALDO A LIQUIDAR:* $${balance.toLocaleString()} MXN (Máximo 1 día antes del evento).\n*DEPÓSITO EN GARANTÍA:* $1,500 MXN (Reembolsable 24hrs post-evento).\n\n*4. PENALIZACIONES (CONDICIONES DE GARANTÍA)*\nEl depósito de $1,500 NO será devuelto en los siguientes casos:\nA) Ruido excesivo fuera de horario.\nB) Ingresar botellas/vasos de vidrio en área de alberca.\nC) Daños al mobiliario, uso de pirotecnia o confeti metálico.\nD) Dejar asador encendido, refrigerador sucio o basura fuera de su lugar.\n\n*5. CANCELACIONES*\nEn caso de cancelación por parte del cliente, los anticipos, pagos parciales o cantidades ya cubiertas no serán reembolsables, debido a que la fecha se separa exclusivamente para su evento desde el momento de la confirmación.\n\n*6. PRIVACIDAD / INE*\nLa identificación oficial será utilizada únicamente para validar la identidad del responsable del evento y administrar la reserva, conforme al Aviso de Privacidad de Casa Copal.\n\n✍️ *FIRMA DIGITAL DE CONFORMIDAD*\nPara confirmar tu reserva, aceptar este contrato y asegurar tu fecha, por favor responde a este mensaje con la frase:\n*"Acepto términos y condiciones"*`;
             setGeneratedContract(text);
           };
 
