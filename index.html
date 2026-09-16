@@ -38,7 +38,7 @@
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
         import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, getDoc, setDoc, runTransaction, writeBatch } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
-        import { LayoutDashboard, CalendarDays, WalletCards, Users, Megaphone, PlusCircle, LogOut, CheckCircle2, AlertCircle, TrendingUp, FileText, Copy, Smartphone, Download, UserCircle, Settings, Lock, Sparkles, Loader2, FileSpreadsheet } from 'lucide-react';
+        import { LayoutDashboard, CalendarDays, WalletCards, Users, Megaphone, PlusCircle, LogOut, CheckCircle2, AlertCircle, TrendingUp, FileText, Copy, Smartphone, Download, UserCircle, Settings, Lock, Loader2, FileSpreadsheet } from 'lucide-react';
 
         // ============================================================================
         // 1. CONFIGURACIÓN FIREBASE
@@ -55,67 +55,6 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-
-        // ============================================================================
-        // 2. UTILIDAD GEMINI API (IA)
-        // ============================================================================
-        const callGeminiAI = async (prompt, expectJson = false) => {
-            const apiKey = "AIzaSyDCFd4xJLZ7wazjwZ5cGLnl-z8PhQfKncY"; 
-            const modelVersion = "gemini-1.5-flash"; 
-
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelVersion}:generateContent?key=${apiKey}`;
-            
-            let finalPrompt = "Eres un asistente de negocios para un salón de eventos familiares llamado Casa Copal.\n\n" + prompt;
-            if (expectJson) {
-                finalPrompt += "\n\nIMPORTANTE: Devuelve ÚNICAMENTE un objeto JSON válido. No uses bloques de código de markdown, ni saludes, ni agregues texto extra.";
-            }
-
-            const payload = { contents: [{ parts: [{ text: finalPrompt }] }] };
-
-            let retries = 3;
-            let delay = 2000;
-
-            while (retries > 0) {
-                try {
-                    const response = await fetch(url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    
-                    const data = await response.json();
-                    
-                    if (!response.ok) {
-                        const errMsg = data.error?.message || '';
-                        if (errMsg.toLowerCase().includes("high demand") || response.status === 503 || response.status === 429) {
-                            throw new Error("HIGH_DEMAND");
-                        }
-                        throw new Error(errMsg || 'Error de Google API');
-                    }
-                    
-                    let textResult = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                    if(!textResult) throw new Error('La IA devolvió una respuesta vacía.');
-                    
-                    if (expectJson) {
-                        // Limpiar backticks si la IA los incluye
-                        textResult = textResult.replace(/[\`]{3}json\n?/g, '').replace(/[\`]{3}\n?/g, '').trim();
-                        return JSON.parse(textResult);
-                    }
-                    
-                    return textResult;
-                } catch (error) {
-                    retries--;
-                    if (retries === 0) {
-                        if (error.message === "HIGH_DEMAND") {
-                            throw new Error("Los servidores de IA están saturados en este momento. Espera unos segundos y vuelve a intentar.");
-                        }
-                        throw error;
-                    }
-                    await new Promise(r => setTimeout(r, delay));
-                    delay *= 1.5; 
-                }
-            }
-        };
 
         const TEAM_PROFILES = {
           'pierreretrock@gmail.com': { id: 'admin', name: 'Pierre', role: 'Administrador', canViewAll: true, canViewBookings: true, canManageBookings: true, canViewBookingFinancials: true, canViewExpenses: true },
@@ -714,11 +653,11 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
                   
                   {activeTab === 'quotes' && activeProfile.canViewAll && <QuotesModule db={db} quotes={quotes} showToast={showToast} onConvertToBooking={(q) => { setQuoteToConvert(q); setActiveTab('bookings'); }} />}
 
-                  {activeTab === 'expenses' && (activeProfile.canViewAll || activeProfile.canViewExpenses) && <ExpensesModule db={db} expenses={expenses} expenseCategories={expenseCategories} activeProfile={activeProfile} showToast={showToast} callGeminiAI={callGeminiAI} />}
+                  {activeTab === 'expenses' && (activeProfile.canViewAll || activeProfile.canViewExpenses) && <ExpensesModule db={db} expenses={expenses} expenseCategories={expenseCategories} activeProfile={activeProfile} showToast={showToast} />}
                   
                   {activeTab === 'clients' && activeProfile.canViewAll && <ClientsModule db={db} clients={clients} clientNotes={clientNotes} showToast={showToast} />}
                   
-                  {activeTab === 'marketing' && activeProfile.canViewAll && <MarketingHub db={db} bookings={bookings} handleCopyText={handleCopyText} showToast={showToast} callGeminiAI={callGeminiAI} onReservationCreated={() => setActiveTab('bookings')} />}
+                  {activeTab === 'marketing' && activeProfile.canViewAll && <MarketingHub db={db} bookings={bookings} handleCopyText={handleCopyText} showToast={showToast} onReservationCreated={() => setActiveTab('bookings')} />}
                 </div>
               </main>
             </div>
@@ -2928,7 +2867,7 @@ return (
           );
         }
 
-        function ExpensesModule({ db, expenses, expenseCategories, activeProfile, showToast, callGeminiAI }) {
+        function ExpensesModule({ db, expenses, expenseCategories, activeProfile, showToast }) {
           const emptyExpenseForm = () => ({
             date: new Date().toISOString().split('T')[0],
             category: expenseCategories[0]?.name || '',
@@ -2945,8 +2884,6 @@ return (
           const [newCatName, setNewCatName] = useState('');
           const [editingCategory, setEditingCategory] = useState(null);
           const [isCategorySaving, setIsCategorySaving] = useState(false);
-          const [aiPrompt, setAiPrompt] = useState('');
-          const [isAiLoading, setIsAiLoading] = useState(false);
           const [showExpenseFormModal, setShowExpenseFormModal] = useState(false);
           const [expenseFilters, setExpenseFilters] = useState({ search: '', category: 'Todas', status: 'Todos', month: '', dateFrom: '', dateTo: '' });
 
@@ -3045,7 +2982,6 @@ return (
               }
               setForm(emptyExpenseForm());
               setShowExpenseFormModal(false);
-              setAiPrompt('');
             } catch(err) { showToast('Error al guardar: ' + err.message, 'error'); }
           };
 
@@ -3122,26 +3058,6 @@ return (
             try { await deleteDoc(doc(db, 'categorias_gastos', id)); showToast('Categoría eliminada'); }
             catch (err) { showToast('No se pudo eliminar la categoría: ' + err.message, 'error'); }
             finally { setIsCategorySaving(false); }
-          };
-
-          const handleAIParse = async () => {
-              if(!aiPrompt.trim()) return showToast('Escribe algo primero', 'error');
-              setIsAiLoading(true);
-              try {
-                  const catList = expenseCategories.map(c => c.name).join(', ');
-                  const result = await callGeminiAI(`Analiza este texto de un gasto de un salón de eventos y extrae los datos en formato JSON estricto con las claves: "monto" (solo números), "descripcion" (texto breve capitalizado), "proveedor" (nombre del negocio o persona a quien se pagó) y "categoria" (debes elegir exactamente UNA de esta lista: ${catList}. Si ninguna cuadra usa "General"). Texto: "${aiPrompt}"`, true);
-                  if(result && result.monto) {
-                    setForm(p => ({
-                      ...p,
-                      amount: result.monto.toString(),
-                      description: result.descripcion || p.description,
-                      provider: result.proveedor || p.provider,
-                      category: result.categoria || p.category
-                    }));
-                    setShowExpenseFormModal(true);
-                    showToast('✨ Formulario autocompletado');
-                  }
-              } catch (err) { showToast('IA: ' + (err.message || 'Error desconocido'), 'error'); } finally { setIsAiLoading(false); }
           };
 
           return (
@@ -3249,16 +3165,6 @@ return (
                   </table>
                 )}
                 <p className="px-4 sm:px-6 py-3 text-xs text-slate-500 border-t border-slate-100">{filteredExpenses.length} registros coinciden con los filtros. Los adeudos se muestran por separado. Los porcentajes pueden variar ligeramente por redondeo.</p>
-              </div>
-
-              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-2xl shadow-sm border border-indigo-100 flex flex-col md:flex-row gap-4 items-center">
-                  <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm shrink-0"><Sparkles className="text-indigo-500 w-6 h-6" /></div>
-                  <div className="flex-1 w-full"><h4 className="text-sm font-bold text-indigo-900 mb-1">Registro Mágico</h4>
-                      <div className="flex flex-col md:flex-row gap-2">
-                          <input type="text" placeholder='Ej. "Compré cloro en Walmart por 500 pesos"' className="w-full p-3 bg-white border border-indigo-200 rounded-xl focus:ring-2 focus:ring-indigo-400 outline-none text-sm text-slate-700" value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAIParse()} />
-                          <button onClick={handleAIParse} disabled={isAiLoading} className="bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors shrink-0 shadow-md disabled:opacity-50 flex items-center justify-center min-w-[150px]">{isAiLoading ? <Loader2 className="w-5 h-5 animate-spin mx-auto"/> : '✨ Autocompletar'}</button>
-                      </div>
-                  </div>
               </div>
 
               {showExpenseFormModal && (
@@ -3413,7 +3319,7 @@ return (
           );
         }
 
-        function MarketingHub({ db, bookings, handleCopyText, showToast, callGeminiAI, onReservationCreated }) {
+        function MarketingHub({ db, bookings, handleCopyText, showToast, onReservationCreated }) {
           const [contractData, setContractData] = useState({ client: '', phone: '', email: '', date: '', type: '', startTime: '', endTime: '', salon: '', depto: '', discount: '', deposit: '' });
           const [generatedContract, setGeneratedContract] = useState('');
           const [lockCode, setLockCode] = useState('');
@@ -3421,24 +3327,10 @@ return (
           const [generatedManual, setGeneratedManual] = useState('');
           const [copiedContract, setCopiedContract] = useState(false);
           const [copiedManual, setCopiedManual] = useState(false);
-          const [aiPostTopic, setAiPostTopic] = useState('');
-          const [generatedPost, setGeneratedPost] = useState('');
-          const [isAiLoading, setIsAiLoading] = useState(false);
-          const [copiedPost, setCopiedPost] = useState(false);
           const [contractReservationNotice, setContractReservationNotice] = useState(null);
 
           const setContractNotice = (msg, type = 'info') => {
             setContractReservationNotice({ msg, type });
-          };
-
-          const handleGeneratePost = async () => {
-              if(!aiPostTopic.trim()) return showToast('Escribe de qué tratará tu post', 'error');
-              setIsAiLoading(true);
-              try {
-                  const prompt = `Escribe un post muy atractivo y persuasivo para Instagram/Facebook sobre este tema: "${aiPostTopic}". Recuerda que somos "Casa Copal", un salón de eventos familiares con alberca, asador y departamento privado en Cabo San Lucas. Usa emojis, un tono amigable, persuasivo y termina SIEMPRE con un llamado a la acción invitando a reservar enviando un WhatsApp al 624 320 3289.`;
-                  const result = await callGeminiAI(prompt);
-                  if(result) setGeneratedPost(result);
-              } catch (err) { showToast('IA: ' + (err.message || 'Error desconocido'), 'error'); } finally { setIsAiLoading(false); }
           };
 
           const calculateContractTotals = () => {
@@ -3571,15 +3463,6 @@ return (
           return (
             <div className="animate-fade-in space-y-6 pb-20">
               <div><h2 className="text-3xl font-black text-slate-800">Hub de Ventas</h2></div>
-              {/* IA Redes Sociales */}
-              <div className="bg-gradient-to-r from-fuchsia-50 to-pink-50 p-6 rounded-3xl shadow-sm border flex flex-col md:flex-row gap-6">
-                  <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center shrink-0"><Sparkles className="text-fuchsia-500 w-8 h-8" /></div>
-                  <div className="flex-1 w-full space-y-3">
-                      <div><h3 className="text-xl font-black text-fuchsia-900">Redactor Mágico para Redes</h3></div>
-                      <div className="flex gap-3"><input type="text" placeholder='Ej. "Post de que nos quedan pocas fechas"' className="flex-1 p-3.5 rounded-xl border outline-none" value={aiPostTopic} onChange={(e) => setAiPostTopic(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleGeneratePost()}/><button onClick={handleGeneratePost} disabled={isAiLoading} className="bg-fuchsia-600 text-white font-bold px-6 rounded-xl">{isAiLoading ? <Loader2 className="w-5 h-5 animate-spin"/> : 'Generar Copy'}</button></div>
-                      {generatedPost && ( <div className="mt-4 bg-white p-4 rounded-xl relative shadow-sm"><button onClick={()=>{handleCopyText(generatedPost); setCopiedPost(true); setTimeout(()=>setCopiedPost(false),2000);}} className="absolute top-3 right-3 text-xs bg-fuchsia-100 text-fuchsia-700 px-3 py-1.5 rounded-lg font-bold">{copiedPost ? '¡Copiado!' : 'Copiar'}</button><p className="text-sm whitespace-pre-wrap pr-20">{generatedPost}</p></div> )}
-                  </div>
-              </div>
               <div className="grid grid-cols-1 gap-6 items-start">
                 <div className="hidden">
                   <div className="mb-6"><h3 className="font-black text-slate-800 text-xl">Generador de Contratos</h3></div>
