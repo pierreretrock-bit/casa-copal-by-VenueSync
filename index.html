@@ -37,7 +37,7 @@
         import { createRoot } from 'react-dom/client';
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
-        import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, getDoc, setDoc, runTransaction } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+        import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, getDoc, setDoc, runTransaction, writeBatch } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
         import { LayoutDashboard, CalendarDays, WalletCards, Users, Megaphone, PlusCircle, LogOut, CheckCircle2, AlertCircle, TrendingUp, FileText, Copy, Smartphone, Download, UserCircle, Settings, Lock, Sparkles, Loader2, FileSpreadsheet } from 'lucide-react';
 
         // ============================================================================
@@ -2943,6 +2943,8 @@ return (
           const [editingExpense, setEditingExpense] = useState(null);
           const [showCatModal, setShowCatModal] = useState(false);
           const [newCatName, setNewCatName] = useState('');
+          const [editingCategory, setEditingCategory] = useState(null);
+          const [isCategorySaving, setIsCategorySaving] = useState(false);
           const [aiPrompt, setAiPrompt] = useState('');
           const [isAiLoading, setIsAiLoading] = useState(false);
           const [showExpenseFormModal, setShowExpenseFormModal] = useState(false);
@@ -2999,15 +3001,8 @@ return (
               });
             return Object.entries(grouped)
               .map(([category, total]) => ({ category, total }))
-              .sort((a, b) => b.total - a.total)
-              .slice(0, 8);
+              .sort((a, b) => b.total - a.total);
           }, [filteredExpenses]);
-
-          const maxCategoryExpense = useMemo(() => {
-            return Math.max(...expensesByCategory.map(item => item.total), 1);
-          }, [expensesByCategory]);
-
-          const chartColors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#f97316', '#64748b'];
 
           const handleExportExpensesToCSV = () => {
             if (filteredExpenses.length === 0) return showToast('No hay gastos para exportar', 'error');
@@ -3070,8 +3065,64 @@ return (
           };
 
           const handleDeleteExpense = async (id) => { if (window.confirm('¿Eliminar gasto de forma permanente?')) { try { await deleteDoc(doc(db, 'gastos', id)); showToast('Gasto eliminado exitosamente'); } catch (err) { showToast('Error al eliminar', 'error'); } } };
-          const handleAddCategory = async () => { if (!newCatName.trim()) return; try { await addDoc(collection(db, 'categorias_gastos'), { name: newCatName.trim() }); setNewCatName(''); showToast('Categoría agregada'); } catch (err) { showToast('Error', 'error'); } };
-          const handleDeleteCategory = async (id) => { if (window.confirm('¿Eliminar esta categoría?')) { try { await deleteDoc(doc(db, 'categorias_gastos', id)); showToast('Categoría eliminada'); } catch (err) { showToast('Error', 'error'); } } };
+          const handleAddCategory = async () => {
+            const name = newCatName.trim();
+            if (!name || isCategorySaving) return;
+            if (expenseCategories.some(c => c.name.trim().toLowerCase() === name.toLowerCase())) return showToast('Ya existe una categoría con ese nombre', 'error');
+            setIsCategorySaving(true);
+            try {
+              await addDoc(collection(db, 'categorias_gastos'), { name });
+              setNewCatName('');
+              showToast('Categoría agregada');
+            } catch (err) { showToast('No se pudo agregar la categoría: ' + err.message, 'error'); }
+            finally { setIsCategorySaving(false); }
+          };
+
+          const handleRenameCategory = async () => {
+            if (!editingCategory || isCategorySaving) return;
+            const name = editingCategory.name.trim();
+            const original = expenseCategories.find(c => c.id === editingCategory.id);
+            if (!original) return showToast('La categoría ya no existe. Cierra y vuelve a abrir la lista.', 'error');
+            if (!name) return showToast('Escribe un nombre para la categoría', 'error');
+            if (expenseCategories.some(c => c.id !== original.id && c.name.trim().toLowerCase() === name.toLowerCase())) return showToast('Ya existe una categoría con ese nombre', 'error');
+            if (name === original.name) { setEditingCategory(null); return; }
+            setIsCategorySaving(true);
+            try {
+              // Read current records, including legacy category field names.
+              const snapshot = await getDocs(collection(db, 'gastos'));
+              const linkedExpenses = snapshot.docs.filter(item => {
+                const data = item.data();
+                return (data.category || data.categoria || data.tipo || 'General') === original.name;
+              });
+              // Keep the rename atomic: category + expenses in one batch (max. 500 writes).
+              if (linkedExpenses.length > 499) {
+                showToast('Esta categoría tiene más de 499 gastos. El cambio requiere una migración por etapas; no se modificó ningún registro.', 'error');
+                return;
+              }
+              const batch = writeBatch(db);
+              batch.update(doc(db, 'categorias_gastos', original.id), { name });
+              linkedExpenses.forEach(item => batch.update(item.ref, { category: name }));
+              await batch.commit();
+              setExpenseFilters(current => current.category === original.name ? { ...current, category: name } : current);
+              setForm(current => current.category === original.name ? { ...current, category: name } : current);
+              setEditingExpense(current => current && current.category === original.name ? { ...current, category: name } : current);
+              setEditingCategory(null);
+              showToast(`Categoría actualizada en ${linkedExpenses.length} gastos`);
+            } catch (err) { showToast('No se pudo cambiar el nombre. No se guardaron cambios: ' + err.message, 'error'); }
+            finally { setIsCategorySaving(false); }
+          };
+
+          const handleDeleteCategory = async (id) => {
+            if (isCategorySaving) return;
+            const category = expenseCategories.find(c => c.id === id);
+            if (!category) return;
+            if (expenses.some(e => e._cat === category.name)) return showToast('Esta categoría tiene gastos. Puedes renombrarla; para eliminarla, primero cambia la categoría de esos gastos.', 'error');
+            if (!window.confirm(`¿Eliminar la categoría "${category.name}"?`)) return;
+            setIsCategorySaving(true);
+            try { await deleteDoc(doc(db, 'categorias_gastos', id)); showToast('Categoría eliminada'); }
+            catch (err) { showToast('No se pudo eliminar la categoría: ' + err.message, 'error'); }
+            finally { setIsCategorySaving(false); }
+          };
 
           const handleAIParse = async () => {
               if(!aiPrompt.trim()) return showToast('Escribe algo primero', 'error');
@@ -3101,55 +3152,10 @@ return (
                   <p className="text-slate-500 font-medium">Solo los gastos <span className="text-emerald-600 font-bold">Pagados</span> se restarán de tus utilidades.</p>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                  <button type="button" onClick={() => { setEditingCategory(null); setShowCatModal(true); }} className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-sm font-bold py-2.5 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 w-full sm:w-fit"><Settings className="w-4 h-4"/> Administrar categorías</button>
                   <button type="button" onClick={() => setShowExpenseFormModal(true)} className="bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold py-2.5 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 w-full sm:w-fit"><PlusCircle className="w-4 h-4"/> Nuevo gasto</button>
                   <button onClick={handleExportExpensesToCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2.5 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 w-full sm:w-fit"><FileSpreadsheet className="w-4 h-4"/> Descargar a Excel</button>
                 </div>
-              </div>
-
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <div className="flex flex-col md:flex-row justify-between md:items-end gap-3 mb-5">
-                  <div>
-                    <h3 className="font-black text-slate-800 text-lg">Gastos pagados por categoría</h3>
-                    <p className="text-xs text-slate-500 font-medium">Gráfica calculada con los filtros activos. Pasa el mouse sobre una barra para ver el monto.</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest">
-                    <span className="bg-slate-100 text-slate-500 px-3 py-1.5 rounded-full border border-slate-200">{filteredExpenses.length} registros</span>
-                    <span className="bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full border border-amber-100">Adeudos filtrados disponibles</span>
-                  </div>
-                </div>
-
-                {expensesByCategory.length === 0 ? (
-                  <div className="bg-slate-50 border border-dashed border-slate-200 rounded-2xl p-8 text-center">
-                    <p className="text-sm font-bold text-slate-400">No hay gastos pagados para graficar con estos filtros.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {expensesByCategory.map((item, index) => {
-                      const percent = Math.max((item.total / maxCategoryExpense) * 100, 6);
-                      const color = chartColors[index % chartColors.length];
-                      return (
-                        <div key={item.category} className="group relative">
-                          <div className="flex justify-between items-center mb-1.5 gap-3">
-                            <p className="text-xs font-black uppercase tracking-widest text-slate-600 truncate">{item.category}</p>
-                            <p className="text-[10px] font-bold text-slate-400 md:hidden">Toca la barra</p>
-                          </div>
-                          <div className="h-9 bg-slate-100 rounded-full overflow-visible border border-slate-200 relative shadow-inner">
-                            <div
-                              className="h-full rounded-full transition-all duration-300 group-hover:brightness-95 shadow-sm flex items-center justify-end pr-3"
-                              style={{ width: `${percent}%`, backgroundColor: color }}
-                            >
-                              <span className="text-white text-[10px] font-black uppercase tracking-widest hidden sm:inline">{Math.round(percent)}%</span>
-                            </div>
-                            <div className="pointer-events-none absolute right-2 -top-12 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity bg-slate-900 text-white text-xs font-black px-3 py-2 rounded-xl shadow-xl z-20 whitespace-nowrap">
-                              {item.category}: ${item.total.toLocaleString('es-MX')}
-                              <div className="absolute left-1/2 -bottom-1 w-2 h-2 bg-slate-900 rotate-45"></div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
 
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
@@ -3188,6 +3194,61 @@ return (
                   </div>
                 </div>
                 <button type="button" onClick={() => setExpenseFilters({ search: '', category: 'Todas', status: 'Todos', month: '', dateFrom: '', dateTo: '' })} className="mt-4 text-xs font-bold text-slate-500 hover:text-slate-800 underline">Limpiar filtros</button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" aria-label="Resumen de gastos con los filtros activos">
+                <div className="bg-emerald-50 p-5 rounded-2xl border border-emerald-200">
+                  <p className="text-sm font-bold text-emerald-800">Total pagado</p>
+                  <p className="text-3xl font-black text-emerald-900 mt-2 break-words tabular-nums">${totalFilteredExpenses.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  <p className="text-xs text-emerald-800 mt-2">Gastos pagados que coinciden con los filtros.</p>
+                </div>
+                <div className="bg-amber-50 p-5 rounded-2xl border border-amber-200">
+                  <p className="text-sm font-bold text-amber-800">Adeudos</p>
+                  <p className="text-3xl font-black text-amber-900 mt-2 break-words tabular-nums">${totalDebtExpenses.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  <p className="text-xs text-amber-800 mt-2">Pendientes de pago que coinciden con los filtros. No se restan de las utilidades.</p>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="p-4 sm:p-6 border-b border-slate-100">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h3 className="font-black text-slate-800 text-lg">Gastos pagados por categoría</h3>
+                    <span className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-full">{expensesByCategory.length} categorías</span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-2">Todas las categorías, de mayor a menor gasto. El porcentaje corresponde al total pagado con los filtros activos.</p>
+                </div>
+                {expensesByCategory.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-50">
+                    <p className="text-sm font-bold text-slate-500">{expenseFilters.status === 'Adeudo' ? 'El filtro está en Adeudo. Selecciona Todos o Pagado para ver este desglose.' : 'No hay gastos pagados con estos filtros.'}</p>
+                  </div>
+                ) : (
+                  <table className="w-full table-fixed text-sm" aria-label="Distribución del total pagado por categoría">
+                    <thead className="bg-slate-50 text-slate-600 text-xs">
+                      <tr>
+                        <th scope="col" className="w-[40%] p-3 sm:px-6 text-left font-bold">Categoría</th>
+                        <th scope="col" className="w-[36%] p-3 sm:px-6 text-right font-bold">Monto pagado</th>
+                        <th scope="col" className="w-[24%] p-3 sm:px-6 text-right font-bold">% del total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {expensesByCategory.map(item => (
+                        <tr key={item.category} className="hover:bg-slate-50">
+                          <th scope="row" className="p-3 sm:px-6 text-left font-semibold text-slate-700 break-words">{item.category}</th>
+                          <td className="p-3 sm:px-6 text-right font-bold text-slate-900 tabular-nums break-words">${item.total.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td className="p-3 sm:px-6 text-right text-slate-600 tabular-nums">{totalFilteredExpenses !== 0 ? `${((item.total / totalFilteredExpenses) * 100).toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-900">
+                      <tr>
+                        <th scope="row" className="p-3 sm:px-6 text-left">Total pagado</th>
+                        <td className="p-3 sm:px-6 text-right tabular-nums break-words">${totalFilteredExpenses.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td className="p-3 sm:px-6 text-right tabular-nums">{totalFilteredExpenses !== 0 ? '100%' : '—'}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                )}
+                <p className="px-4 sm:px-6 py-3 text-xs text-slate-500 border-t border-slate-100">{filteredExpenses.length} registros coinciden con los filtros. Los adeudos se muestran por separado. Los porcentajes pueden variar ligeramente por redondeo.</p>
               </div>
 
               <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-2xl shadow-sm border border-indigo-100 flex flex-col md:flex-row gap-4 items-center">
@@ -3311,12 +3372,40 @@ return (
               )}
 
               {showCatModal && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-6">
-                    <h3 className="font-black text-xl text-slate-800 mb-4">Categorías de Gastos</h3>
-                    <div className="flex gap-2 mb-4"><input type="text" value={newCatName} onChange={e=>setNewCatName(e.target.value)} className="flex-1 p-2 bg-slate-50 border rounded-lg outline-none text-sm" placeholder="Nueva categoría..."/><button type="button" onClick={handleAddCategory} className="bg-emerald-600 text-white px-4 rounded-lg font-bold">+</button></div>
-                    <div className="max-h-60 overflow-y-auto border border-slate-100 rounded-lg">{expenseCategories.map(c => <div key={c.id} className="flex justify-between p-3 border-b hover:bg-slate-50"><span className="text-sm font-bold text-slate-700">{c.name}</span><button type="button" onClick={() => handleDeleteCategory(c.id)} className="text-rose-500"><i className="fa-solid fa-trash"></i></button></div>)}</div>
-                    <button type="button" onClick={() => setShowCatModal(false)} className="w-full mt-4 bg-slate-100 text-slate-700 font-bold py-2.5 rounded-lg">Cerrar</button>
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+                  <div role="dialog" aria-modal="true" aria-labelledby="expense-categories-title" className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5 sm:p-6">
+                    <h3 id="expense-categories-title" className="font-black text-xl text-slate-800 mb-2">Categorías de gastos</h3>
+                    <p className="text-sm text-slate-500 mb-4">Al cambiar un nombre, también se actualiza la categoría de sus gastos. Los montos y fechas se conservan.</p>
+                    <form onSubmit={e => { e.preventDefault(); handleAddCategory(); }} className="flex gap-2 mb-4">
+                      <input type="text" aria-label="Nombre de nueva categoría" disabled={isCategorySaving} value={newCatName} onChange={e => setNewCatName(e.target.value)} className="min-w-0 flex-1 p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm" placeholder="Nueva categoría..."/>
+                      <button type="submit" disabled={isCategorySaving || !newCatName.trim()} className="bg-emerald-600 text-white px-3 py-2 rounded-lg font-bold text-sm disabled:opacity-50">Agregar</button>
+                    </form>
+                    <div className="border border-slate-100 rounded-lg divide-y divide-slate-100">
+                      {expenseCategories.length === 0 && <p className="p-4 text-sm text-slate-500">Todavía no hay categorías. Agrega la primera arriba.</p>}
+                      {expenseCategories.map(c => (
+                        <div key={c.id} className="p-3">
+                          {editingCategory?.id === c.id ? (
+                            <form onSubmit={e => { e.preventDefault(); handleRenameCategory(); }} className="space-y-2">
+                              <input autoFocus type="text" aria-label={`Nuevo nombre de ${c.name}`} disabled={isCategorySaving} value={editingCategory.name} onChange={e => setEditingCategory({ ...editingCategory, name: e.target.value })} className="w-full min-w-0 p-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-sm"/>
+                              <div className="flex gap-2 justify-end">
+                                <button type="button" disabled={isCategorySaving} onClick={() => setEditingCategory(null)} className="px-3 py-2 rounded-lg bg-slate-100 text-slate-600 text-sm font-bold disabled:opacity-50">Cancelar</button>
+                                <button type="submit" disabled={isCategorySaving || !editingCategory.name.trim()} className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-bold disabled:opacity-50">{isCategorySaving ? 'Guardando…' : 'Guardar nombre'}</button>
+                              </div>
+                            </form>
+                          ) : (
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-sm font-bold text-slate-700 break-words min-w-0">{c.name}</span>
+                              <div className="flex gap-2 shrink-0">
+                                <button type="button" disabled={isCategorySaving} aria-label={`Editar categoría ${c.name}`} onClick={() => setEditingCategory({ id: c.id, name: c.name })} className="px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-xs font-bold disabled:opacity-50">Editar</button>
+                                <button type="button" disabled={isCategorySaving} aria-label={`Eliminar categoría ${c.name}`} onClick={() => handleDeleteCategory(c.id)} className="px-3 py-2 rounded-lg bg-rose-50 text-rose-700 text-xs font-bold disabled:opacity-50">Eliminar</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-3">Solo se pueden eliminar categorías sin gastos asociados.</p>
+                    <button type="button" disabled={isCategorySaving} onClick={() => { setShowCatModal(false); setEditingCategory(null); }} className="w-full mt-4 bg-slate-100 text-slate-700 font-bold py-2.5 rounded-lg disabled:opacity-50">Cerrar</button>
                   </div>
                 </div>
               )}
