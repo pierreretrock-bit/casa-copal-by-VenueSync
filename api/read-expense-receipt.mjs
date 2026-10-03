@@ -51,7 +51,25 @@ export default async function handler(req, res) {
         generationConfig:{responseMimeType:'application/json',responseSchema:{type:'OBJECT',properties:{date:{type:'STRING',nullable:true},provider:{type:'STRING',nullable:true},amount:{type:'NUMBER',nullable:true},description:{type:'STRING',nullable:true},category:{type:'STRING',nullable:true},warning:{type:'STRING',nullable:true}},required:['date','provider','amount','description','category','warning']}}
       })
     });
-    if(!response.ok) return res.status(response.status===429?429:502).json({error:response.status===429?'Se alcanzó la cuota de lectura de IA. Intenta después.':'La IA no pudo leer el archivo. Revisa la clave y el modelo configurados o captura manualmente.'});
+    if (!response.ok) {
+      const failure = await response.json().catch(() => null);
+      const reasons = Array.isArray(failure?.error?.details)
+        ? failure.error.details.map(item => item?.reason) : [];
+      const errors = {
+        400: 'Gemini rechazó el formato de la solicitud (HTTP 400).',
+        401: 'Gemini rechazó la autenticación de la clave (HTTP 401).',
+        403: 'Gemini denegó el acceso: revisa permisos o bloqueo de la clave (HTTP 403).',
+        404: 'El modelo configurado no está disponible (HTTP 404).',
+        429: 'Se alcanzó la cuota de Gemini (HTTP 429).'
+      };
+      const invalidKey = reasons.includes('API_KEY_INVALID');
+      console.error('receipt_gemini_error', {status: response.status, invalidKey});
+      return res.status(response.status === 429 ? 429 : 502).json({
+        error: invalidKey
+          ? 'La clave de Gemini no es válida.'
+          : errors[response.status] || 'Gemini falló (HTTP ' + response.status + ').'
+      });
+    }
     const result = await response.json();
     const text = result.candidates?.[0]?.content?.parts?.map(p=>p.text || '').join('');
     if(!text) return res.status(422).json({error:'No se pudieron extraer datos. Prueba con una imagen más clara o captura manualmente.'});
