@@ -58,6 +58,7 @@ export default async function handler(req, res) {
       const errors = {
         400: 'Gemini rechazó el formato de la solicitud (HTTP 400).',
         401: 'Gemini rechazó la autenticación de la clave (HTTP 401).',
+        402: 'Gemini requiere saldo de prepago. Revisa la facturación y los créditos en Google AI Studio (HTTP 402).',
         403: 'Gemini denegó el acceso: revisa permisos o bloqueo de la clave (HTTP 403).',
         404: 'El modelo configurado no está disponible (HTTP 404).',
         429: 'Se alcanzó la cuota de Gemini (HTTP 429).'
