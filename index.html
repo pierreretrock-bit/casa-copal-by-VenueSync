@@ -38,6 +38,7 @@
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
         import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, getDoc, setDoc, runTransaction, writeBatch } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+        import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js';
         import { LayoutDashboard, CalendarDays, WalletCards, Users, Megaphone, PlusCircle, LogOut, CheckCircle2, AlertCircle, TrendingUp, FileText, Copy, Smartphone, Download, UserCircle, Settings, Lock, Loader2, FileSpreadsheet } from 'lucide-react';
 
         // ============================================================================
@@ -54,6 +55,7 @@
 
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
+        const storage = getStorage(app);
         const db = getFirestore(app);
 
         const TEAM_PROFILES = {
@@ -2878,6 +2880,13 @@ return (
             notes: ''
           });
 
+          const [receiptFile, setReceiptFile] = useState(null);
+          const [receiptPreview, setReceiptPreview] = useState('');
+          const [receiptMessage, setReceiptMessage] = useState('');
+          const [isReceiptReading, setIsReceiptReading] = useState(false);
+          const [isExpenseSaving, setIsExpenseSaving] = useState(false);
+          const expenseBusy = React.useRef(false);
+          const receiptGeneration = React.useRef(0);
           const [form, setForm] = useState(emptyExpenseForm());
           const [editingExpense, setEditingExpense] = useState(null);
           const [showCatModal, setShowCatModal] = useState(false);
@@ -2892,6 +2901,79 @@ return (
               setForm(f => ({ ...f, category: expenseCategories[0].name }));
             }
           }, [expenseCategories]);
+
+          useEffect(() => {
+            if (!receiptFile || !receiptFile.type.startsWith('image/')) { setReceiptPreview(''); return; }
+            const url = URL.createObjectURL(receiptFile);
+            setReceiptPreview(url);
+            return () => URL.revokeObjectURL(url);
+          }, [receiptFile]);
+
+          const clearReceipt = () => { receiptGeneration.current++; setReceiptFile(null); setReceiptMessage(''); };
+          const closeNewExpense = () => { if (expenseBusy.current) return; clearReceipt(); setForm(emptyExpenseForm()); setShowExpenseFormModal(false); };
+          const closeEditExpense = () => { if (expenseBusy.current) return; clearReceipt(); setEditingExpense(null); };
+          const selectReceipt = e => {
+            const file = e.target.files?.[0]; e.target.value = '';
+            if (!file || expenseBusy.current) return;
+            if (!['image/jpeg', 'image/png', 'application/pdf'].includes(file.type)) return showToast('Selecciona JPG, PNG o PDF.', 'error');
+            if (!file.size || file.size > 3000000) return showToast('El comprobante debe pesar como máximo 3 MB.', 'error');
+            receiptGeneration.current++; setReceiptFile(file); setReceiptMessage('Archivo seleccionado. Puedes leerlo o capturar el gasto manualmente.');
+          };
+          const readReceipt = async () => {
+            if (!receiptFile || expenseBusy.current) return;
+            if (!auth.currentUser) return showToast('Inicia sesión nuevamente.', 'error');
+            expenseBusy.current = true; setIsReceiptReading(true);
+            const generation = receiptGeneration.current;
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 55000);
+            try {
+              const base64 = await new Promise((resolve, reject) => {
+                const reader = new FileReader(); reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+                reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.readAsDataURL(receiptFile);
+              });
+              const token = await auth.currentUser.getIdToken();
+              const response = await fetch('/api/read-expense-receipt', {
+                method: 'POST', signal: controller.signal,
+                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+                body: JSON.stringify({ mimeType: receiptFile.type, data: base64, categories: expenseCategories.map(c => c.name) })
+              });
+              const result = await response.json().catch(() => ({ error: 'La lectura no está disponible. Revisa la función API en Vercel.' }));
+              if (!response.ok) throw new Error(result.error || 'No se pudo interpretar el comprobante.');
+              if (generation !== receiptGeneration.current) return;
+              const data = result.expense;
+              if (!data || typeof data !== 'object') throw new Error('Respuesta de lectura inválida.');
+              const fill = previous => ({ ...previous,
+                date: typeof data.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(data.date) ? data.date : previous.date,
+                provider: typeof data.provider === 'string' && data.provider.trim() ? data.provider : previous.provider,
+                description: typeof data.description === 'string' && data.description.trim() ? data.description : previous.description,
+                amount: typeof data.amount === 'number' && Number.isFinite(data.amount) && data.amount > 0 ? String(data.amount) : previous.amount,
+                category: expenseCategories.some(c => c.name === data.category) ? data.category : previous.category
+              });
+              if (editingExpense) setEditingExpense(fill); else setForm(fill);
+              setReceiptMessage('Lectura terminada. Revisa fecha, proveedor, monto y categoría antes de guardar. ' + (typeof data.warning === 'string' ? data.warning : ''));
+              showToast('Datos extraídos. Revisa el formulario.');
+            } catch (err) {
+              const message = err.name === 'AbortError' ? 'La lectura tardó demasiado. Puedes capturar manualmente o reintentar.' : err.message;
+              setReceiptMessage(message); showToast(message, 'error');
+            } finally { clearTimeout(timer); expenseBusy.current = false; setIsReceiptReading(false); }
+          };
+          const receiptControls = () => (
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+              <p className="font-bold text-slate-800">Comprobante (opcional)</p>
+              <p className="text-xs text-slate-500">Un JPG, PNG o PDF de hasta 3 MB. La lectura envía el archivo a Google Gemini. Revisa los datos antes de guardar.</p>
+              {editingExpense?.receiptUrl && !receiptFile && <a href={editingExpense.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline text-sm">Ver comprobante actual</a>}
+              <input aria-label="Seleccionar comprobante" type="file" accept="image/jpeg,image/png,application/pdf,.jpg,.jpeg,.png,.pdf" disabled={isExpenseSaving || isReceiptReading} onChange={selectReceipt} className="block w-full text-sm"/>
+              {receiptFile && <React.Fragment>
+                <p className="text-sm break-all">{receiptFile.name}</p>
+                {receiptPreview && <img src={receiptPreview} alt="Vista previa del comprobante" className="max-h-40 max-w-full object-contain rounded-lg"/>}
+                <div className="flex gap-3">
+                  <button type="button" disabled={isReceiptReading || isExpenseSaving} onClick={readReceipt} className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-sm font-bold disabled:opacity-50">{isReceiptReading ? 'Leyendo…' : 'Leer comprobante'}</button>
+                  <button type="button" disabled={isReceiptReading || isExpenseSaving} onClick={clearReceipt} className="px-3 py-2 rounded-lg bg-white border text-sm disabled:opacity-50">Quitar archivo</button>
+                </div>
+              </React.Fragment>}
+              {receiptMessage && <p role="status" className="text-sm text-slate-700">{receiptMessage}</p>}
+            </div>
+          );
 
           const filteredExpenses = useMemo(() => {
             const search = expenseFilters.search.trim().toLowerCase();
@@ -2956,36 +3038,40 @@ return (
 
           const handleSaveExpense = async (e) => {
             e.preventDefault();
+            if (expenseBusy.current) return;
+            const values = editingExpense || form;
+            if (!Number.isFinite(Number(values.amount)) || Number(values.amount) <= 0 || !values.description.trim() || !values.date || !values.category) return showToast('Revisa fecha, categoría, descripción y monto mayor que cero.', 'error');
+            expenseBusy.current = true; setIsExpenseSaving(true);
+            let uploadedPath = ''; let committed = false;
             try {
-              if (editingExpense) {
-                await updateDoc(doc(db, 'gastos', editingExpense.id), {
-                  date: editingExpense.date,
-                  category: editingExpense.category,
-                  provider: editingExpense.provider || '',
-                  amount: Number(editingExpense.amount),
-                  description: editingExpense.description,
-                  status: editingExpense.status,
-                  notes: editingExpense.notes || ''
-                });
-                showToast('Gasto actualizado');
-                setEditingExpense(null);
-              } else {
-                await addDoc(collection(db, 'gastos'), {
-                  ...form,
-                  category: form.category || (expenseCategories[0]?.name || 'General'),
-                  provider: form.provider || '',
-                  amount: Number(form.amount),
-                  recordedBy: activeProfile.name,
-                  timestamp: Date.now()
-                });
-                showToast('Gasto registrado');
+              const expenseRef = editingExpense ? doc(db, 'gastos', editingExpense.id) : doc(collection(db, 'gastos'));
+              let receipt = {};
+              if (receiptFile) {
+                if (!auth.currentUser) throw new Error('Inicia sesión nuevamente.');
+                const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'application/pdf': 'pdf' }[receiptFile.type];
+                uploadedPath = 'gastos_comprobantes/' + expenseRef.id + '/' + crypto.randomUUID() + '.' + extension;
+                await uploadBytes(storageRef(storage, uploadedPath), receiptFile, {contentType:receiptFile.type});
+                receipt = { receiptPath:uploadedPath, receiptUrl:await getDownloadURL(storageRef(storage,uploadedPath)), receiptName:receiptFile.name, receiptType:receiptFile.type };
               }
-              setForm(emptyExpenseForm());
-              setShowExpenseFormModal(false);
-            } catch(err) { showToast('Error al guardar: ' + err.message, 'error'); }
+              const data = {date:values.date, category:values.category, provider:values.provider || '', amount:Number(values.amount), description:values.description, status:values.status, notes:values.notes || '', ...receipt};
+              if (editingExpense) await updateDoc(expenseRef, data);
+              else await setDoc(expenseRef, {...data, recordedBy:activeProfile.name, timestamp:Date.now()});
+              committed = true;
+              const previousPath = editingExpense?.receiptPath;
+              if (uploadedPath && previousPath && previousPath.startsWith('gastos_comprobantes/' + expenseRef.id + '/')) {
+                try { await deleteObject(storageRef(storage, previousPath)); } catch { showToast('Gasto guardado. No se pudo retirar el comprobante anterior.', 'error'); }
+              }
+              showToast(editingExpense ? 'Gasto actualizado' : 'Gasto registrado');
+              setEditingExpense(null); setForm(emptyExpenseForm()); setShowExpenseFormModal(false); clearReceipt();
+            } catch(err) {
+              if (uploadedPath && !committed) { try { await deleteObject(storageRef(storage,uploadedPath)); } catch {} }
+              showToast('Error al guardar: ' + err.message + '. Conservamos los datos para reintentar.', 'error');
+            } finally { expenseBusy.current = false; setIsExpenseSaving(false); }
           };
 
           const handleEdit = (expense) => {
+            if (expenseBusy.current) return;
+            clearReceipt();
             try {
               setEditingExpense({
                 id: expense.id,
@@ -2995,6 +3081,10 @@ return (
                 amount: String(expense._monto ?? expense.amount ?? 0),
                 description: expense._desc || expense.description || '',
                 status: expense._status || expense.status || 'Pagado',
+                receiptUrl: expense.receiptUrl || '',
+                receiptName: expense.receiptName || '',
+                receiptType: expense.receiptType || '',
+                receiptPath: expense.receiptPath || '',
                 notes: expense.notes || ''
               });
             } catch (err) { showToast("No se pudo abrir el gasto para edición", "error"); }
@@ -3175,10 +3265,12 @@ return (
                         <h3 className="font-black text-xl text-slate-800">Nuevo gasto</h3>
                         <p className="text-xs text-slate-500 mt-1 font-bold">Captura fecha, proveedor, categoría, monto y observaciones.</p>
                       </div>
-                      <button type="button" onClick={() => setShowExpenseFormModal(false)} className="w-9 h-9 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"><i className="fa-solid fa-xmark"></i></button>
+                      <button type="button" disabled={isExpenseSaving || isReceiptReading} onClick={closeNewExpense} className="w-9 h-9 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"><i className="fa-solid fa-xmark"></i></button>
                     </div>
 
                     <form onSubmit={handleSaveExpense} className="p-5 space-y-4 overflow-y-auto">
+                      {receiptControls()}
+                      <fieldset disabled={isExpenseSaving || isReceiptReading} className="space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Fecha</label>
@@ -3197,7 +3289,7 @@ return (
                         </div>
                         <div>
                           <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Monto ($)</label>
-                          <input type="number" required min="1" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-black text-rose-600" value={form.amount} onChange={e=>setForm({...form, amount: e.target.value})}/>
+                          <input type="number" required min="0.01" step="0.01" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 font-black text-rose-600" value={form.amount} onChange={e=>setForm({...form, amount: e.target.value})}/>
                         </div>
                       </div>
 
@@ -3218,9 +3310,10 @@ return (
                       </div>
 
                       <div className="flex flex-col sm:flex-row gap-3 pt-2 border-t border-slate-100">
-                        <button type="button" onClick={() => setShowExpenseFormModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 rounded-xl transition-colors">Cancelar</button>
-                        <button type="submit" className="flex-1 bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-emerald-600 transition-colors shadow-lg">Guardar gasto</button>
+                        <button type="button" disabled={isExpenseSaving || isReceiptReading} onClick={closeNewExpense} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 rounded-xl transition-colors">Cancelar</button>
+                        <button type="submit" className="flex-1 bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-emerald-600 transition-colors shadow-lg">{isExpenseSaving ? 'Guardando…' : 'Guardar gasto'}</button>
                       </div>
+                      </fieldset>
                     </form>
                   </div>
                 </div>
@@ -3233,9 +3326,9 @@ return (
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="overflow-x-auto pb-2">
                   <table className="w-full text-left min-w-[1050px]">
-                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-bold border-b border-slate-200"><tr><th className="p-4 text-center w-24">Acciones</th><th className="p-4">Fecha</th><th className="p-4">Proveedor</th><th className="p-4">Descripción</th><th className="p-4">Categoría</th><th className="p-4 text-center">Estado</th><th className="p-4 text-right">Monto</th><th className="p-4">Observaciones</th></tr></thead>
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-bold border-b border-slate-200"><tr><th className="p-4 text-center w-24">Acciones</th><th className="p-4">Fecha</th><th className="p-4">Proveedor</th><th className="p-4">Descripción</th><th className="p-4">Categoría</th><th className="p-4 text-center">Estado</th><th className="p-4 text-right">Monto</th><th className="p-4">Observaciones</th><th className="p-4">Comprobante</th></tr></thead>
                     <tbody className="divide-y divide-slate-100">
-                      {filteredExpenses.length === 0 ? ( <tr><td colSpan="8" className="p-8 text-center text-slate-400">Sin gastos registrados con esos filtros</td></tr>
+                      {filteredExpenses.length === 0 ? ( <tr><td colSpan="9" className="p-8 text-center text-slate-400">Sin gastos registrados con esos filtros</td></tr>
                       ) : filteredExpenses.map(e => (
                         <tr key={e.id} className="hover:bg-slate-50">
                           <td className="p-4 text-center"><div className="flex items-center justify-center gap-2"><button type="button" onClick={() => handleEdit(e)} className="w-8 h-8 bg-slate-200 text-slate-700 hover:bg-blue-100 hover:text-blue-700 rounded-full flex items-center justify-center shadow-sm"><i className="fa-solid fa-pen text-sm"></i></button><button type="button" onClick={() => handleDeleteExpense(e.id)} className="w-8 h-8 bg-slate-200 text-slate-700 hover:bg-rose-100 hover:text-rose-700 rounded-full flex items-center justify-center shadow-sm"><i className="fa-solid fa-trash text-sm"></i></button></div></td>
@@ -3254,6 +3347,7 @@ return (
                               <span className="text-xs text-slate-400 font-medium">-</span>
                             )}
                           </td>
+                          <td className="p-4">{e.receiptUrl ? <a href={e.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline text-sm font-bold">Ver comprobante</a> : <span className="text-xs text-slate-400">Sin comprobante</span>}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -3263,15 +3357,18 @@ return (
 
               {editingExpense && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-0">
-                    <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center"><div><h3 className="font-black text-xl text-slate-800">Editar Gasto</h3></div><button type="button" onClick={() => setEditingExpense(null)} className="w-8 h-8 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"><i className="fa-solid fa-xmark"></i></button></div>
+                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md max-h-[92vh] overflow-y-auto p-0">
+                    <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center"><div><h3 className="font-black text-xl text-slate-800">Editar Gasto</h3></div><button type="button" disabled={isExpenseSaving || isReceiptReading} onClick={closeEditExpense} className="w-8 h-8 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200 transition-colors shadow-sm"><i className="fa-solid fa-xmark"></i></button></div>
                     <form onSubmit={handleSaveExpense} className="p-6 space-y-4">
+                      {receiptControls()}
+                      <fieldset disabled={isExpenseSaving || isReceiptReading} className="space-y-4">
                       <div className="grid grid-cols-2 gap-4"><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Fecha</label><input type="date" className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.date} onChange={e => setEditingExpense({...editingExpense, date: e.target.value})} required/></div><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Categoría</label><select className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.category} onChange={e => setEditingExpense({...editingExpense, category: e.target.value})} required>{expenseCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div></div>
                       <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Proveedor</label><input type="text" className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.provider || ''} onChange={e => setEditingExpense({...editingExpense, provider: e.target.value})}/></div>
-                      <div className="grid grid-cols-2 gap-4"><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Monto ($)</label><input type="number" className="w-full p-3 bg-slate-50 border rounded-xl outline-none text-rose-600 font-bold" value={editingExpense.amount} onChange={e => setEditingExpense({...editingExpense, amount: e.target.value})} required/></div><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Estado</label><select className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.status} onChange={e => setEditingExpense({...editingExpense, status: e.target.value})}><option value="Pagado">Pagado</option><option value="Adeudo">Adeudo</option></select></div></div>
+                      <div className="grid grid-cols-2 gap-4"><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Monto ($)</label><input type="number" min="0.01" step="0.01" className="w-full p-3 bg-slate-50 border rounded-xl outline-none text-rose-600 font-bold" value={editingExpense.amount} onChange={e => setEditingExpense({...editingExpense, amount: e.target.value})} required/></div><div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Estado</label><select className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.status} onChange={e => setEditingExpense({...editingExpense, status: e.target.value})}><option value="Pagado">Pagado</option><option value="Adeudo">Adeudo</option></select></div></div>
                       <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Descripción</label><input type="text" className="w-full p-3 bg-slate-50 border rounded-xl outline-none" value={editingExpense.description} onChange={e => setEditingExpense({...editingExpense, description: e.target.value})} required/></div>
                       <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Observaciones</label><textarea className="w-full p-3 bg-slate-50 border rounded-xl outline-none resize-none" rows="2" value={editingExpense.notes} onChange={e => setEditingExpense({...editingExpense, notes: e.target.value})}></textarea></div>
-                      <button type="submit" className="w-full bg-slate-900 text-white font-bold py-3.5 rounded-xl mt-4">Actualizar Gasto</button>
+                      <button type="submit" className="w-full bg-slate-900 text-white font-bold py-3.5 rounded-xl mt-4">{isExpenseSaving ? 'Guardando…' : 'Actualizar Gasto'}</button>
+                      </fieldset>
                     </form>
                   </div>
                 </div>
