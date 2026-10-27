@@ -321,6 +321,7 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
       cliente_telefono: d.cliente_telefono || '',
       cliente_correo: d.cliente_correo || '',
       origen: d.origen || 'web_publica',
+       origen_comercial: d.origen_comercial || 'no_identificado',
       createdAt: d.createdAt || ''
     };
   });
@@ -876,7 +877,7 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
 
         function QuotesModule({ db, quotes, showToast, onConvertToBooking }) {
           const [form, setForm] = useState({
-            name: '', phone: '', email: '', date: '', type: '', guests: '50', includesDepto: false, discount: 0
+            name: '', phone: '', email: '', date: '', type: '', guests: '50', includesDepto: false, discount: 0, origen_comercial: 'no_identificado'
           });
 
           const d = form.date ? new Date(form.date + 'T12:00:00') : new Date();
@@ -896,6 +897,7 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
                 cliente_nombre: form.name,
                 cliente_telefono: form.phone,
                 cliente_correo: form.email,
+                origen_comercial: form.origen_comercial || 'no_identificado',
                 date: form.date,
                 type: form.type,
                 guests: form.guests,
@@ -906,7 +908,7 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
                 timestamp: Date.now()
               });
               showToast('Cotización guardada exitosamente');
-              setForm({ name: '', phone: '', email: '', date: '', type: '', guests: '50', includesDepto: false, discount: 0 });
+              setForm({ name: '', phone: '', email: '', date: '', type: '', guests: '50', includesDepto: false, discount: 0, origen_comercial: 'no_identificado' });
             } catch (err) {
               console.error(err);
               showToast('Error al guardar la cotización', 'error');
@@ -922,7 +924,8 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
               type: q.type || '',
               guests: q.guests || '50',
               includesDepto: q.depto_incluido || false,
-              discount: q.descuento_aplicado || 0
+              discount: q.descuento_aplicado || 0,
+              origen_comercial: q.origen_comercial || 'no_identificado'
             });
             showToast('Cotización lista para generar PDF');
             window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -977,6 +980,7 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
                           <input type="date" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 text-sm" value={form.date} onChange={e=>setForm({...form, date: e.target.value})} required/>
                         </div>
                       </div>
+<div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">¿Cómo nos conoció el cliente?</label><select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" value={form.origen_comercial || 'no_identificado'} onChange={e => setForm({...form, origen_comercial:e.target.value})}><option value="no_identificado">No sabemos todavía</option><option value="facebook">Facebook</option><option value="instagram">Instagram</option><option value="google">Google</option><option value="recomendacion">Recomendación de otra persona</option><option value="cliente_anterior">Ya había contratado Casa Copal</option><option value="otro">Otro</option></select></div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tipo de Evento</label>
@@ -1127,7 +1131,8 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
   costSalon: '',
   costDepto: '',
   anticipo: '',
-  observations: ''
+  observations: '',
+  origen_comercial: 'no_identificado'
 });
           const [bookingToFree, setBookingToFree] = useState(null); 
           const [editingBooking, setEditingBooking] = useState(null); 
@@ -1159,7 +1164,8 @@ const unsubWebRequests = onSnapshot(webRequestsRef, (snapshot) => {
   costSalon: suggestedCosts.salon,
   costDepto: suggestedCosts.depto,
   isWeekend: isWknd,
-  observations: initialData.observaciones || ''
+  observations: initialData.observaciones || '',
+   origen_comercial: initialData.origen_comercial || 'no_identificado'
 }));
               setShowBookingFormModal(true);
               showToast('Datos de cotización cargados en el formulario');
@@ -1472,6 +1478,7 @@ const handleSyncOccupiedDates = async () => {
         horario_inicio: form.startTime || '',
         horario_fin: form.endTime || '',
         observaciones: (form.observations || '').trim(),
+         origen_comercial: form.origen_comercial || 'no_identificado',
         descuento_aplicado: form.discount || 0,
         origen: 'hub_interno',
         timestamp: now
@@ -1502,7 +1509,8 @@ const handleSyncOccupiedDates = async () => {
       costSalon: '',
       costDepto: '',
       anticipo: '',
-      observations: ''
+      observations: '',
+  origen_comercial: 'no_identificado'
     });
 
     setShowBookingFormModal(false);
@@ -1586,8 +1594,9 @@ const handleSyncOccupiedDates = async () => {
         observaciones: request.observaciones || '',
         descuento_aplicado: 0,
         origen: 'web_publica',
-        solicitudWebId: request.id,
-        timestamp: now,
+         origen_comercial: requestSnap.data().origen_comercial || 'no_identificado',
+         solicitudWebId: request.id,
+         timestamp: now,
         createdBy: activeProfile?.name || 'Admin'
       });
 
@@ -1744,6 +1753,7 @@ const handleDiscardWebRequest = async (request) => {
               horario_inicio: editingBooking.horario_inicio || '',
               horario_fin: editingBooking.horario_fin || '',
               observaciones: (editingBooking.observaciones || '').trim(),
+              origen_comercial: editingBooking.origen_comercial || 'no_identificado',
               date: newDate,
               fecha_contratacion: contractDate,
               costo_salon: salonCost,
@@ -2491,6 +2501,19 @@ return (
                           </td>
                           <td className="p-6 align-top">
                             <p className="font-black text-slate-800 mb-2 text-sm">{b._nombreStr}</p>
+                            <div className="mb-2 text-[10px] font-bold text-slate-600">
+                              <span className="inline-block bg-emerald-50 border border-emerald-100 rounded px-2 py-1">
+                                Cómo nos conoció: {({
+                                  facebook: 'Facebook',
+                                  instagram: 'Instagram',
+                                  google: 'Google',
+                                  recomendacion: 'Recomendación',
+                                  cliente_anterior: 'Cliente anterior',
+                                  otro: 'Otro',
+                                  no_identificado: 'No identificado'
+                                })[b.origen_comercial] || 'No identificado'}
+                              </span>
+                            </div>
                             <div className="flex flex-col gap-1.5">
                               {b._telefonoStr && (
                                 <a href={`https://wa.me/52${b._telefonoStr.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[10px] text-emerald-700 font-bold bg-emerald-50 border border-emerald-100 px-2 py-1 rounded w-fit hover:bg-emerald-100 transition-colors shadow-sm" title="Abrir chat de WhatsApp"><i className="fa-brands fa-whatsapp text-emerald-500 text-sm"></i> {b._telefonoStr}</a>
@@ -2644,7 +2667,8 @@ return (
   </div>
 </div>
 
-                      <div>
+                      <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">¿Cómo nos conoció el cliente?</label><select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" value={form.origen_comercial || 'no_identificado'} onChange={e => setForm({...form, origen_comercial:e.target.value})}><option value="no_identificado">No sabemos todavía</option><option value="facebook">Facebook</option><option value="instagram">Instagram</option><option value="google">Google</option><option value="recomendacion">Recomendación de otra persona</option><option value="cliente_anterior">Ya había contratado Casa Copal</option><option value="otro">Otro</option></select></div>
+<div>
                         <label className="block text-[10px] font-black text-amber-600 uppercase tracking-widest mb-1.5">Observaciones de la reserva</label>
                         <textarea rows="3" placeholder="Ej. decoración entra a las 2:00 pm, DJ externo, pendiente confirmar mesas..." className="w-full p-3 bg-amber-50 border border-amber-200 rounded-xl focus:ring-2 focus:ring-amber-400 outline-none transition-all text-sm font-bold text-slate-700 resize-none" value={form.observations} onChange={e => setForm({...form, observations: e.target.value})}></textarea>
                       </div>
@@ -2748,7 +2772,8 @@ return (
     />
   </div>
 </div>
-                      <div>
+                      <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">¿Cómo nos conoció el cliente?</label><select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" value={editingBooking.origen_comercial || 'no_identificado'} onChange={e => setEditingBooking({...editingBooking, origen_comercial:e.target.value})}><option value="no_identificado">No sabemos todavía</option><option value="facebook">Facebook</option><option value="instagram">Instagram</option><option value="google">Google</option><option value="recomendacion">Recomendación de otra persona</option><option value="cliente_anterior">Ya había contratado Casa Copal</option><option value="otro">Otro</option></select></div>
+<div>
                         <label className="block text-[10px] font-black text-amber-600 uppercase tracking-widest mb-1.5">Observaciones de la reserva</label>
                         <textarea rows="3" className="w-full p-3 bg-amber-50 border border-amber-200 rounded-xl outline-none focus:border-amber-400 font-bold text-slate-700 resize-none" value={editingBooking.observaciones || ''} onChange={e => setEditingBooking({...editingBooking, observaciones: e.target.value})} placeholder="Detalles operativos del evento..."></textarea>
                       </div>
