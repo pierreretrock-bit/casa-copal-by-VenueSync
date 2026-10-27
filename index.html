@@ -2501,6 +2501,19 @@ return (
                           </td>
                           <td className="p-6 align-top">
                             <p className="font-black text-slate-800 mb-2 text-sm">{b._nombreStr}</p>
+                            <div className="mb-2 text-[10px] font-bold text-slate-600">
+                              <span className="inline-block bg-emerald-50 border border-emerald-100 rounded px-2 py-1">
+                                Cómo nos conoció: {({
+                                  facebook: 'Facebook',
+                                  instagram: 'Instagram',
+                                  google: 'Google',
+                                  recomendacion: 'Recomendación',
+                                  cliente_anterior: 'Cliente anterior',
+                                  otro: 'Otro',
+                                  no_identificado: 'No identificado'
+                                })[b.origen_comercial] || 'No identificado'}
+                              </span>
+                            </div>
                             <div className="flex flex-col gap-1.5">
                               {b._telefonoStr && (
                                 <a href={`https://wa.me/52${b._telefonoStr.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[10px] text-emerald-700 font-bold bg-emerald-50 border border-emerald-100 px-2 py-1 rounded w-fit hover:bg-emerald-100 transition-colors shadow-sm" title="Abrir chat de WhatsApp"><i className="fa-brands fa-whatsapp text-emerald-500 text-sm"></i> {b._telefonoStr}</a>
